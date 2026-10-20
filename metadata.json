@@ -1,0 +1,6 @@
+{
+  "name": "Badminton Tournament Skill Assessment & Grouping Master",
+  "description": "企業與社團羽球比賽程度自評與智慧分組系統，依據台灣羽球推廣協會1-18級制度，提供新手友善問卷、Google登入、與主辦人後台實力平衡自動分組。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
