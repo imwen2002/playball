@@ -1,0 +1,31 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128;
+    }
+
+    function isValidPlayer(data) {
+      return data.keys().hasAll(['name', 'email', 'gender', 'dominantHand', 'level', 'tierName', 'assessmentMode', 'submittedAt']) &&
+        data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+        data.email is string && data.email.size() > 0 && data.email.size() <= 150 &&
+        (data.gender == 'male' || data.gender == 'female') &&
+        (data.dominantHand == 'right' || data.dominantHand == 'left') &&
+        data.level is number && data.level >= 1 && data.level <= 18 &&
+        data.tierName is string && data.tierName.size() <= 50 &&
+        (data.assessmentMode == 'quiz' || data.assessmentMode == 'direct') &&
+        data.submittedAt is string && data.submittedAt.size() <= 50 &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 500));
+    }
+
+    match /players/{playerId} {
+      allow read: if true;
+      allow create, update: if isValidId(playerId) && isValidPlayer(request.resource.data);
+      allow delete: if isValidId(playerId);
+    }
+  }
+}

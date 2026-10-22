@@ -5,18 +5,21 @@
 
 import React, { useState, useEffect } from 'react';
 import { UserAccount, PlayerSubmission } from './types';
-import { SAMPLE_PLAYERS } from './data/samplePlayers';
 import { Header } from './components/Header';
 import { AssessmentForm } from './components/AssessmentForm';
 import { AdminDashboard } from './components/AdminDashboard';
 import { OfficialChartModal } from './components/OfficialChartModal';
-import { GoogleAuthModal } from './components/GoogleAuthModal';
 import { DeploymentGuideModal } from './components/DeploymentGuideModal';
 import { AdminPasswordModal } from './components/AdminPasswordModal';
+import {
+  subscribeToPlayers,
+  savePlayerSubmission,
+  deletePlayerSubmission,
+  batchLoadSamplePlayers,
+} from './firebase';
 import { Award, Globe, Lock, KeyRound } from 'lucide-react';
 
-const STORAGE_PLAYERS_KEY = 'badminton_tournament_players_v1';
-const STORAGE_USER_KEY = 'badminton_tournament_user_v1';
+const STORAGE_USER_KEY = 'badminton_tournament_user_v2';
 const SESSION_ADMIN_UNLOCKED_KEY = 'badminton_admin_unlocked_v1';
 
 export default function App() {
@@ -25,7 +28,6 @@ export default function App() {
 
   // Modals
   const [isChartOpen, setIsChartOpen] = useState(false);
-  const [isLoginOpen, setIsLoginOpen] = useState(false);
   const [isDeployGuideOpen, setIsDeployGuideOpen] = useState(false);
   const [isAdminPasswordModalOpen, setIsAdminPasswordModalOpen] = useState(false);
 
@@ -38,7 +40,7 @@ export default function App() {
     }
   });
 
-  // User state (default signed in with current user email or loaded from storage)
+  // User state: starts completely blank by default (no hardcoded awenaiuse@gmail.com)
   const [user, setUser] = useState<UserAccount>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_USER_KEY);
@@ -47,65 +49,58 @@ export default function App() {
       // ignore
     }
     return {
-      email: 'awenaiuse@gmail.com',
-      name: '林阿文',
-      avatar: 'https://api.dicebear.com/7.x/initials/svg?seed=Awen&backgroundColor=059669',
-      isSignedIn: true,
+      email: '',
+      name: '',
+      isSignedIn: false,
     };
   });
 
-  // Players roster
-  const [players, setPlayers] = useState<PlayerSubmission[]>(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_PLAYERS_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
+  // Players roster from cloud database (starts empty, no default 16 sample players)
+  const [players, setPlayers] = useState<PlayerSubmission[]>([]);
+
+  // Real-time synchronization with Firebase Firestore
+  useEffect(() => {
+    const unsubscribe = subscribeToPlayers(
+      (cloudPlayers) => {
+        setPlayers(cloudPlayers);
+      },
+      (err) => {
+        console.warn('Realtime cloud sync error:', err);
       }
-    } catch {
-      // ignore
-    }
-    // Default seed with realistic colleagues so the organizer can try grouping immediately!
-    return SAMPLE_PLAYERS;
-  });
+    );
+    return () => unsubscribe();
+  }, []);
 
-  // Sync players to localStorage
+  // Sync user state to localStorage for local device recall
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_PLAYERS_KEY, JSON.stringify(players));
-    } catch {
-      // ignore
-    }
-  }, [players]);
-
-  // Sync user to localStorage
-  useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
+      if (user.email) {
+        localStorage.setItem(STORAGE_USER_KEY, JSON.stringify(user));
+      }
     } catch {
       // ignore
     }
   }, [user]);
 
-  // Find current user's existing submission
-  const currentUserSubmission = players.find((p) => p.email === user?.email) || null;
+  // Find current user's existing submission from cloud roster if any
+  const currentUserSubmission =
+    players.find((p) => p.email && user.email && p.email.toLowerCase() === user.email.toLowerCase()) ||
+    null;
 
-  // Handle new or updated submission
-  const handleSubmitPlayer = (submission: PlayerSubmission) => {
-    const existingIndex = players.findIndex((p) => p.email === submission.email);
-    if (existingIndex >= 0) {
-      const updated = [...players];
-      updated[existingIndex] = submission;
-      setPlayers(updated);
-    } else {
-      setPlayers([submission, ...players]);
-    }
-  };
+  // Handle player submission directly to cloud database
+  const handleSubmitPlayer = async (submission: PlayerSubmission) => {
+    const activeUser: UserAccount = {
+      email: submission.email,
+      name: submission.name,
+      avatar: `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(
+        submission.name
+      )}&backgroundColor=059669`,
+      isSignedIn: true,
+    };
+    setUser(activeUser);
 
-  const handleLoginSuccess = (signedInUser: UserAccount) => {
-    setUser(signedInUser);
+    // Save directly to Firebase Firestore
+    await savePlayerSubmission(submission);
   };
 
   const handleLogout = () => {
@@ -114,6 +109,11 @@ export default function App() {
       name: '',
       isSignedIn: false,
     });
+    try {
+      localStorage.removeItem(STORAGE_USER_KEY);
+    } catch {
+      // ignore
+    }
   };
 
   // Tab switching with password gate
@@ -156,13 +156,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-slate-50 flex flex-col text-slate-900">
-      
       {/* Global Header */}
       <Header
         currentTab={currentTab}
         onSelectTab={handleSelectTab}
         user={user}
-        onOpenLogin={() => setIsLoginOpen(true)}
         onLogout={handleLogout}
         onOpenDeployGuide={() => setIsDeployGuideOpen(true)}
         submissionCount={players.length}
@@ -174,20 +172,22 @@ export default function App() {
         {currentTab === 'assessment' && (
           <AssessmentForm
             user={user}
-            onOpenLogin={() => setIsLoginOpen(true)}
             onSubmitPlayer={handleSubmitPlayer}
             existingSubmission={currentUserSubmission}
             onViewOfficialChart={() => setIsChartOpen(true)}
           />
         )}
 
-        {currentTab === 'admin' && (
-          isAdminAuthenticated ? (
+        {currentTab === 'admin' &&
+          (isAdminAuthenticated ? (
             <AdminDashboard
               players={players}
               onUpdatePlayers={setPlayers}
               onViewOfficialChart={() => setIsChartOpen(true)}
               onLockAdmin={handleLockAdmin}
+              onDeletePlayer={deletePlayerSubmission}
+              onSavePlayer={savePlayerSubmission}
+              onBatchAddPlayers={batchLoadSamplePlayers}
             />
           ) : (
             <div className="max-w-md mx-auto my-16 p-8 bg-white rounded-2xl border border-slate-200 shadow-sm text-center space-y-4">
@@ -207,8 +207,7 @@ export default function App() {
                 <span>輸入密碼解鎖後台</span>
               </button>
             </div>
-          )
-        )}
+          ))}
       </main>
 
       {/* Footer */}
@@ -217,7 +216,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <span className="font-bold text-slate-800">義鼎杯羽球賽事程度自評與智慧分組系統</span>
             <span aria-hidden="true">·</span>
-            <span>依據台灣羽球推廣協會 1~18 級制度</span>
+            <span>依據台灣羽球推廣協會 1~18 級制度 · 雲端持久儲存</span>
           </div>
 
           <div className="flex items-center gap-4">
@@ -247,14 +246,6 @@ export default function App() {
         selectedLevel={currentUserSubmission?.level}
       />
 
-      {/* Google Login Modal */}
-      <GoogleAuthModal
-        isOpen={isLoginOpen}
-        onClose={() => setIsLoginOpen(false)}
-        onSuccess={handleLoginSuccess}
-        currentEmail={user?.email || 'awenaiuse@gmail.com'}
-      />
-
       {/* Deployment Guide Modal */}
       <DeploymentGuideModal
         isOpen={isDeployGuideOpen}
@@ -267,7 +258,6 @@ export default function App() {
         onSuccess={handleAdminPasswordSuccess}
         onCancel={() => setIsAdminPasswordModalOpen(false)}
       />
-
     </div>
   );
 }

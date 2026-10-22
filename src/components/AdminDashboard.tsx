@@ -31,6 +31,9 @@ interface AdminDashboardProps {
   onUpdatePlayers: (players: PlayerSubmission[]) => void;
   onViewOfficialChart: () => void;
   onLockAdmin?: () => void;
+  onDeletePlayer?: (playerId: string) => Promise<void>;
+  onSavePlayer?: (player: PlayerSubmission) => Promise<void>;
+  onBatchAddPlayers?: (players: PlayerSubmission[]) => Promise<void>;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -38,6 +41,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onUpdatePlayers,
   onViewOfficialChart,
   onLockAdmin,
+  onDeletePlayer,
+  onSavePlayer,
+  onBatchAddPlayers,
 }) => {
   // Navigation inside Admin
   const [activeAdminTab, setActiveAdminTab] = useState<'roster' | 'grouping' | 'print'>('grouping');
@@ -128,59 +134,80 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   };
 
   // Preload demo players
-  const handlePreloadSampleData = () => {
+  const handlePreloadSampleData = async () => {
     if (players.length > 0) {
-      if (!confirm('載入示範名單將會與現有名單合併（保留原有名單）。確認要載入 16 位示範同事名單嗎？')) {
+      if (!confirm('載入示範名單將會寫入 16 位測試球員資料至雲端資料庫。確定要載入嗎？')) {
         return;
       }
     }
-    const existingEmails = new Set(players.map((p) => p.email));
-    const toAdd = SAMPLE_PLAYERS.filter((p) => !existingEmails.has(p.email));
-    const merged = [...players, ...toAdd];
-    onUpdatePlayers(merged);
+    const existingEmails = new Set(players.map((p) => p.email.toLowerCase()));
+    const toAdd = SAMPLE_PLAYERS.filter((p) => !existingEmails.has(p.email.toLowerCase()));
+    if (toAdd.length === 0) {
+      alert('示範名單已全數在列表中！');
+      return;
+    }
+    if (onBatchAddPlayers) {
+      await onBatchAddPlayers(toAdd);
+    } else {
+      const merged = [...players, ...toAdd];
+      onUpdatePlayers(merged);
+    }
   };
 
   // Quick level adjust (+1 or -1) by organizer
-  const handleQuickLevelChange = (playerId: string, delta: number) => {
-    const updated = players.map((p) => {
-      if (p.id === playerId) {
-        const newLvl = Math.max(1, Math.min(18, p.level + delta));
-        const tier = getTierByLevel(newLvl);
-        return {
-          ...p,
-          level: newLvl,
-          tierName: tier.name,
-        };
-      }
-      return p;
-    });
-    onUpdatePlayers(updated);
+  const handleQuickLevelChange = async (playerId: string, delta: number) => {
+    const target = players.find((p) => p.id === playerId);
+    if (!target) return;
+    const newLvl = Math.max(1, Math.min(18, target.level + delta));
+    const tier = getTierByLevel(newLvl);
+    const updatedPlayer = {
+      ...target,
+      level: newLvl,
+      tierName: tier.name,
+      updatedAt: new Date().toISOString(),
+    };
+    if (onSavePlayer) {
+      await onSavePlayer(updatedPlayer);
+    } else {
+      onUpdatePlayers(players.map((p) => (p.id === playerId ? updatedPlayer : p)));
+    }
   };
 
   // Delete a single player
-  const handleDeletePlayer = (playerId: string) => {
-    if (confirm('確定要移除此選手的報名資料嗎？')) {
-      onUpdatePlayers(players.filter((p) => p.id !== playerId));
+  const handleDeletePlayer = async (playerId: string) => {
+    if (confirm('確定要移除此選手的報名資料嗎？移除後將同步從雲端資料庫刪除。')) {
+      if (onDeletePlayer) {
+        await onDeletePlayer(playerId);
+      } else {
+        onUpdatePlayers(players.filter((p) => p.id !== playerId));
+      }
     }
   };
 
   // Add manual player
-  const handleAddManualPlayer = (e: React.FormEvent) => {
+  const handleAddManualPlayer = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newPlayerName.trim()) return;
     const tier = getTierByLevel(newPlayerLevel);
+    const cleanEmail = newPlayerEmail.trim().toLowerCase() || `player_${Date.now()}@badminton.local`;
+    const docId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
     const newPlayer: PlayerSubmission = {
-      id: `manual-${Date.now()}`,
+      id: docId,
       name: newPlayerName.trim(),
-      email: newPlayerEmail.trim() || `player_${Date.now()}@company.com`,
+      email: cleanEmail,
       gender: newPlayerGender,
       dominantHand: 'right',
       level: newPlayerLevel,
       tierName: tier.name,
       assessmentMode: 'direct',
-      submittedAt: new Date().toLocaleString('zh-TW', { hour12: false }),
+      submittedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
     };
-    onUpdatePlayers([...players, newPlayer]);
+    if (onSavePlayer) {
+      await onSavePlayer(newPlayer);
+    } else {
+      onUpdatePlayers([...players, newPlayer]);
+    }
     setIsAddPlayerOpen(false);
     setNewPlayerName('');
     setNewPlayerEmail('');

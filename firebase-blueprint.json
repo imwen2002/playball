@@ -1,0 +1,69 @@
+{
+  "entities": {
+    "Player": {
+      "title": "Player",
+      "description": "Badminton tournament player submission and skill assessment",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for player submission"
+        },
+        "name": {
+          "type": "string",
+          "description": "Player's display name",
+          "maxLength": 100
+        },
+        "email": {
+          "type": "string",
+          "description": "Player's contact email address",
+          "maxLength": 150
+        },
+        "gender": {
+          "type": "string",
+          "description": "Gender of player",
+          "enum": ["male", "female"]
+        },
+        "dominantHand": {
+          "type": "string",
+          "description": "Dominant playing hand",
+          "enum": ["right", "left"]
+        },
+        "level": {
+          "type": "number",
+          "description": "Calculated or chosen badminton tier level 1-18"
+        },
+        "tierName": {
+          "type": "string",
+          "description": "Tier name representation",
+          "maxLength": 50
+        },
+        "assessmentMode": {
+          "type": "string",
+          "description": "Assessment mode used",
+          "enum": ["quiz", "direct"]
+        },
+        "notes": {
+          "type": "string",
+          "description": "Player notes or play style preference",
+          "maxLength": 500
+        },
+        "submittedAt": {
+          "type": "string",
+          "description": "ISO timestamp of submission"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "ISO timestamp of update"
+        }
+      },
+      "required": ["name", "email", "gender", "dominantHand", "level", "tierName", "assessmentMode", "submittedAt"]
+    }
+  },
+  "firestore": {
+    "/players/{playerId}": {
+      "schema": "Player",
+      "description": "Collection of all player assessment submissions for the tournament"
+    }
+  }
+}
