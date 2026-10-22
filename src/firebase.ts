@@ -193,3 +193,20 @@ export async function batchLoadSamplePlayers(samples: PlayerSubmission[]): Promi
     handleFirestoreError(err, OperationType.WRITE, PLAYERS_COLLECTION);
   }
 }
+
+/**
+ * Batch delete a list of player doc IDs from Firestore
+ */
+export async function batchDeletePlayers(playerDocIds: string[]): Promise<void> {
+  if (playerDocIds.length === 0) return;
+  const batch = writeBatch(db);
+  for (const docId of playerDocIds) {
+    const docRef = doc(db, PLAYERS_COLLECTION, docId);
+    batch.delete(docRef);
+  }
+  try {
+    await batch.commit();
+  } catch (err) {
+    handleFirestoreError(err, OperationType.DELETE, PLAYERS_COLLECTION);
+  }
+}

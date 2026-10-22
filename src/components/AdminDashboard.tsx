@@ -34,6 +34,7 @@ interface AdminDashboardProps {
   onDeletePlayer?: (playerId: string) => Promise<void>;
   onSavePlayer?: (player: PlayerSubmission) => Promise<void>;
   onBatchAddPlayers?: (players: PlayerSubmission[]) => Promise<void>;
+  onBatchDeleteSamplePlayers?: (samples: PlayerSubmission[]) => Promise<void>;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -44,6 +45,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onDeletePlayer,
   onSavePlayer,
   onBatchAddPlayers,
+  onBatchDeleteSamplePlayers,
 }) => {
   // Navigation inside Admin
   const [activeAdminTab, setActiveAdminTab] = useState<'roster' | 'grouping' | 'print'>('grouping');
@@ -133,6 +135,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setActiveAdminTab('grouping');
   };
 
+  // Find which of the 16 sample players are currently present in the roster
+  const samplePlayersInRoster = useMemo(() => {
+    const sampleEmails = new Set(SAMPLE_PLAYERS.map((p) => p.email.toLowerCase()));
+    return players.filter(
+      (p) => sampleEmails.has(p.email.toLowerCase()) || p.id.startsWith('sample-')
+    );
+  }, [players]);
+
   // Preload demo players
   const handlePreloadSampleData = async () => {
     if (players.length > 0) {
@@ -151,6 +161,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } else {
       const merged = [...players, ...toAdd];
       onUpdatePlayers(merged);
+    }
+  };
+
+  // Quick delete the 16 demo players
+  const handleDeleteSampleData = async () => {
+    const count = samplePlayersInRoster.length;
+    const msg =
+      count > 0
+        ? `確定要一鍵刪除名單內的 ${count} 位預設示範選手嗎？\n此動作將同步從雲端資料庫中移除。`
+        : `確定要一鍵清除所有預設的 16 位示範名單嗎？\n此動作將確保雲端資料庫中的示範選手資料被徹底移除。`;
+
+    if (!confirm(msg)) {
+      return;
+    }
+
+    if (onBatchDeleteSamplePlayers) {
+      await onBatchDeleteSamplePlayers(SAMPLE_PLAYERS);
+    } else {
+      const sampleEmails = new Set(SAMPLE_PLAYERS.map((p) => p.email.toLowerCase()));
+      const remaining = players.filter(
+        (p) => !sampleEmails.has(p.email.toLowerCase()) && !p.id.startsWith('sample-')
+      );
+      onUpdatePlayers(remaining);
     }
   };
 
@@ -265,6 +298,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             >
               <Users className="w-3.5 h-3.5" />
               <span>載入 16 位同事示範名單</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDeleteSampleData}
+              title="一鍵清除所有預設的 16 位測試示範選手名單"
+              className={`px-3.5 py-2 text-xs font-semibold rounded-xl border transition-all flex items-center gap-1.5 cursor-pointer ${
+                samplePlayersInRoster.length > 0
+                  ? 'text-rose-700 bg-rose-50 hover:bg-rose-100 border-rose-300 ring-1 ring-rose-200 shadow-xs'
+                  : 'text-slate-600 bg-slate-50 hover:bg-slate-100 border-slate-200'
+              }`}
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              <span>
+                一鍵刪除 16 位示範名單
+                {samplePlayersInRoster.length > 0 ? ` (${samplePlayersInRoster.length})` : ''}
+              </span>
             </button>
 
             <button
@@ -780,6 +830,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
+          {/* Sample players in roster notice */}
+          {samplePlayersInRoster.length > 0 && (
+            <div className="bg-amber-50/80 border border-amber-200 rounded-xl px-4 py-2.5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs text-amber-900 shadow-xs">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
+                <span>
+                  目前名單中含有 <strong>{samplePlayersInRoster.length} 位預設示範選手</strong>（供測試分組用途）。
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={handleDeleteSampleData}
+                className="text-xs font-bold text-rose-700 hover:text-rose-900 bg-white hover:bg-rose-50 border border-rose-300 rounded-lg px-2.5 py-1 transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>一鍵刪除 16 位示範名單</span>
+              </button>
+            </div>
+          )}
+
           {/* Roster Table */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
             <div className="overflow-x-auto">
@@ -787,7 +857,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase text-[11px] font-bold">
                   <tr>
                     <th className="py-3 px-4">選手姓名</th>
-                    <th className="py-3 px-4">Google 綁定信箱</th>
+                    <th className="py-3 px-4">聯絡信箱 (Email)</th>
                     <th className="py-3 px-4">性別 / 慣用手</th>
                     <th className="py-3 px-4 text-center">戰力級數 (1-18)</th>
                     <th className="py-3 px-4">官方階級</th>
@@ -799,7 +869,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <tbody className="divide-y divide-slate-100">
                   {filteredPlayers.length === 0 ? (
                     <tr>
-                      <td colSpan={7} className="py-8 text-center text-slate-400">
+                      <td colSpan={8} className="py-8 text-center text-slate-400">
                         查無符合篩選條件的羽球選手
                       </td>
                     </tr>

@@ -16,6 +16,7 @@ import {
   savePlayerSubmission,
   deletePlayerSubmission,
   batchLoadSamplePlayers,
+  batchDeletePlayers,
 } from './firebase';
 import { Award, Globe, Lock, KeyRound } from 'lucide-react';
 
@@ -103,6 +104,27 @@ export default function App() {
     await savePlayerSubmission(submission);
   };
 
+  // Batch delete the 16 sample players from cloud Firestore
+  const handleBatchDeleteSamplePlayers = async (samples: PlayerSubmission[]) => {
+    const sampleEmails = new Set(samples.map((s) => s.email.toLowerCase()));
+    const docIdsToDelete = new Set<string>();
+
+    // 1. Add known sample template IDs and sanitized email IDs
+    samples.forEach((s) => {
+      if (s.id) docIdsToDelete.add(s.id);
+      docIdsToDelete.add(s.email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_'));
+    });
+
+    // 2. Also find any player in current roster matching sample emails or sample IDs
+    players.forEach((p) => {
+      if (sampleEmails.has(p.email.toLowerCase()) || p.id.startsWith('sample-')) {
+        docIdsToDelete.add(p.id);
+      }
+    });
+
+    await batchDeletePlayers(Array.from(docIdsToDelete));
+  };
+
   const handleLogout = () => {
     setUser({
       email: '',
@@ -188,6 +210,7 @@ export default function App() {
               onDeletePlayer={deletePlayerSubmission}
               onSavePlayer={savePlayerSubmission}
               onBatchAddPlayers={batchLoadSamplePlayers}
+              onBatchDeleteSamplePlayers={handleBatchDeleteSamplePlayers}
             />
           ) : (
             <div className="max-w-md mx-auto my-16 p-8 bg-white rounded-2xl border border-slate-200 shadow-sm text-center space-y-4">
