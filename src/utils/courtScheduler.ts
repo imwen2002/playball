@@ -253,10 +253,17 @@ export function generateFivePlayerDivisionMatches(
 
 /**
  * Schedule division matches across 3 Courts in sequential Rounds with:
- * 1. Zero Court Collisions: No player ever appears on two courts at the same time.
- * 2. Mandatory Rest Spacing (至少隔一場才能上場):
- *    No player can play in consecutive rounds. Any player who played in Round R
- *    MUST rest in Round R+1, and can play at earliest in Round R+2.
+ * 1. 3-Court Full Saturation (每一輪三個場地都有打，最後一輪未滿三場沒關係):
+ *    As long as there are matches remaining across at least 3 divisions, all 3 courts
+ *    (Court 1, Court 2, Court 3) are scheduled concurrently in that round.
+ *    Only in the final round (or if fewer than 3 divisions have matches left)
+ *    is fewer than 3 courts allowed.
+ * 2. Strict Collision-Free (同一位選手絕不可同時出現在兩個場地):
+ *    Each division plays at most 1 match per round. Because players in each division
+ *    are mutually disjoint, zero player can ever collide across courts in the same round.
+ * 3. Fair Division Rest Rotation (最佳輪替動態休息):
+ *    When choosing which divisions enter the 3 courts in any round, divisions that have
+ *    rested longest (or haven't played yet) receive top priority.
  */
 export function scheduleMatchesToCourts(
   divisionMatchesMap: Map<number, Omit<CourtMatch, 'roundNumber' | 'courtNumber'>[]>,
@@ -280,98 +287,71 @@ export function scheduleMatchesToCourts(
   const maxIterations = 500; // Circuit breaker
 
   while (roundNum <= maxIterations) {
-    // Check if any division has remaining matches
-    let hasMatchesLeft = false;
-    for (const q of queues.values()) {
+    // Collect all divisions that still have matches remaining
+    const availableDivisions: number[] = [];
+    for (const [divIdx, q] of queues.entries()) {
       if (q.length > 0) {
-        hasMatchesLeft = true;
-        break;
+        availableDivisions.push(divIdx);
       }
     }
-    if (!hasMatchesLeft) break;
 
+    if (availableDivisions.length === 0) {
+      break; // All matches across all divisions have been scheduled!
+    }
+
+    // Sort available divisions to determine which ones play in this round:
+    // Priority 1: Longest rest (i.e. roundNum - lastRoundByDivision descending; never played = highest priority)
+    // Priority 2: Most remaining matches in queue descending (prevent laggards)
+    // Priority 3: Division index ascending (deterministic)
+    availableDivisions.sort((a, b) => {
+      const lastA = lastRoundByDivision.get(a);
+      const lastB = lastRoundByDivision.get(b);
+      const restA = lastA === undefined ? 9999 : roundNum - lastA;
+      const restB = lastB === undefined ? 9999 : roundNum - lastB;
+
+      if (restA !== restB) {
+        return restB - restA; // Longest rest first
+      }
+
+      const qA = queues.get(a)?.length || 0;
+      const qB = queues.get(b)?.length || 0;
+      if (qA !== qB) {
+        return qB - qA; // Most remaining matches first
+      }
+
+      return a - b;
+    });
+
+    // We have 3 courts available: Court 1, Court 2, Court 3.
+    // Fill up to 3 courts from the top prioritized divisions.
     const roundMatches: CourtMatch[] = [];
-    const divisionsScheduledInThisRound = new Set<number>();
     const playersInThisRound = new Set<string>();
 
-    // We have 3 courts available: Court 1, Court 2, Court 3
-    for (let court = 1; court <= 3; court++) {
-      // Find eligible candidate division:
-      // 1. Has matches left in queue
-      // 2. Not already scheduled in this round
-      // 3. Division rest constraint: did NOT play in roundNum - 1 (must rest at least 1 round!)
-      // 4. Player rest constraint: none of the 4 players played in roundNum - 1
-      let candidateDiv = -1;
-      let maxRemaining = -1;
+    const courtsToFill = Math.min(3, availableDivisions.length);
 
-      for (const [divIdx, q] of queues.entries()) {
-        if (q.length === 0) continue;
-        if (divisionsScheduledInThisRound.has(divIdx)) continue;
+    for (let court = 1; court <= courtsToFill; court++) {
+      const divIdx = availableDivisions[court - 1];
+      const matchData = queues.get(divIdx)!.shift()!;
 
-        // Check division cooldown (at least 1 round gap)
-        const lastDivRound = lastRoundByDivision.get(divIdx);
-        if (lastDivRound !== undefined && roundNum - lastDivRound < 2) {
-          continue; // Division played in roundNum - 1, MUST REST this round
-        }
+      const matchPlayerIds = [
+        matchData.teamA[0].id,
+        matchData.teamA[1].id,
+        matchData.teamB[0].id,
+        matchData.teamB[1].id,
+      ];
 
-        // Check next match players cooldown
-        const nextMatch = q[0];
-        const matchPlayers = [
-          nextMatch.teamA[0].id,
-          nextMatch.teamA[1].id,
-          nextMatch.teamB[0].id,
-          nextMatch.teamB[1].id,
-        ];
+      matchPlayerIds.forEach((id) => {
+        playersInThisRound.add(id);
+        lastRoundByPlayer.set(id, roundNum);
+      });
 
-        // Ensure none of the 4 players is already playing in this round (collision prevention)
-        const hasCollision = matchPlayers.some((id) => playersInThisRound.has(id));
-        if (hasCollision) continue;
+      lastRoundByDivision.set(divIdx, roundNum);
 
-        // Ensure none of the 4 players played in roundNum - 1 (rest constraint)
-        const hasRestViolation = matchPlayers.some((id) => {
-          const lastRound = lastRoundByPlayer.get(id);
-          return lastRound !== undefined && roundNum - lastRound < 2;
-        });
-        if (hasRestViolation) continue;
-
-        // Prioritize division with the most remaining matches
-        if (q.length > maxRemaining) {
-          maxRemaining = q.length;
-          candidateDiv = divIdx;
-        }
-      }
-
-      if (candidateDiv !== -1 && maxRemaining > 0) {
-        const matchData = queues.get(candidateDiv)!.shift()!;
-        divisionsScheduledInThisRound.add(candidateDiv);
-
-        const matchPlayerIds = [
-          matchData.teamA[0].id,
-          matchData.teamA[1].id,
-          matchData.teamB[0].id,
-          matchData.teamB[1].id,
-        ];
-
-        matchPlayerIds.forEach((id) => {
-          playersInThisRound.add(id);
-          lastRoundByPlayer.set(id, roundNum);
-        });
-
-        lastRoundByDivision.set(candidateDiv, roundNum);
-
-        roundMatches.push({
-          ...matchData,
-          roundNumber: roundNum,
-          courtNumber: court,
-        });
-      }
-    }
-
-    // If no match could be scheduled in this round due to rest constraints,
-    // advance roundNum to let resting divisions/players cool down!
-    if (roundMatches.length === 0) {
-      roundNum++;
-      continue;
+      roundMatches.push({
+        ...matchData,
+        roundNumber: roundNum,
+        courtNumber: court,
+      });
     }
 
     // Identify players resting in this round
@@ -386,7 +366,7 @@ export function scheduleMatchesToCourts(
     roundNum++;
   }
 
-  // Renumber rounds consecutively from 1 to N for clean presentation
+  // Number rounds consecutively from 1 to N
   return rounds.map((round, index) => {
     const newRoundNum = index + 1;
     return {
