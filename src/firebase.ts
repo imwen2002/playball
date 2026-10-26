@@ -210,3 +210,64 @@ export async function batchDeletePlayers(playerDocIds: string[]): Promise<void> 
     handleFirestoreError(err, OperationType.DELETE, PLAYERS_COLLECTION);
   }
 }
+
+const TOURNAMENTS_COLLECTION = 'tournaments';
+const ACTIVE_TOURNAMENT_DOC = 'active';
+
+export interface TournamentCloudState {
+  courtSchedule: any | null;
+  matchScores: Record<string, { scoreA?: number; scoreB?: number; completed?: boolean }>;
+  updatedAt: string;
+}
+
+/**
+ * Subscribe to real-time tournament state (schedule, match scores, completion status)
+ */
+export function subscribeToTournamentState(
+  onUpdate: (state: TournamentCloudState | null) => void,
+  onError?: (error: unknown) => void
+): () => void {
+  const docRef = doc(db, TOURNAMENTS_COLLECTION, ACTIVE_TOURNAMENT_DOC);
+  return onSnapshot(
+    docRef,
+    (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        onUpdate({
+          courtSchedule: data.courtSchedule ?? null,
+          matchScores: data.matchScores ?? {},
+          updatedAt: data.updatedAt ?? new Date().toISOString(),
+        });
+      } else {
+        onUpdate(null);
+      }
+    },
+    (err) => {
+      console.error('Error listening to tournament state:', err);
+      if (onError) onError(err);
+    }
+  );
+}
+
+/**
+ * Save active tournament state to Firestore
+ */
+export async function saveTournamentState(
+  courtSchedule: any | null,
+  matchScores: Record<string, { scoreA?: number; scoreB?: number; completed?: boolean }>
+): Promise<void> {
+  const docRef = doc(db, TOURNAMENTS_COLLECTION, ACTIVE_TOURNAMENT_DOC);
+  try {
+    await setDoc(
+      docRef,
+      {
+        courtSchedule: courtSchedule ?? null,
+        matchScores: matchScores ?? {},
+        updatedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `${TOURNAMENTS_COLLECTION}/${ACTIVE_TOURNAMENT_DOC}`);
+  }
+}

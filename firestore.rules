@@ -27,5 +27,9 @@ service cloud.firestore {
       allow create, update: if isValidId(playerId) && isValidPlayer(request.resource.data);
       allow delete: if isValidId(playerId);
     }
+
+    match /tournaments/{tournamentId} {
+      allow read, write: if isValidId(tournamentId);
+    }
   }
 }

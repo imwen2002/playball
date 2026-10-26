@@ -13,6 +13,7 @@ import {
   validateFivePlayerRule,
   FivePlayerValidationResult,
 } from '../utils/courtScheduler';
+import { subscribeToTournamentState, saveTournamentState } from '../firebase';
 import {
   Users,
   Search,
@@ -97,6 +98,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Match scores tracking (matchId -> { scoreA, scoreB, completed })
   const [matchScores, setMatchScores] = useState<Record<string, { scoreA?: number; scoreB?: number; completed?: boolean }>>({});
 
+  // Cloud realtime sync status
+  const [lastCloudSyncTime, setLastCloudSyncTime] = useState<string | null>(null);
+  const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
+
+  // Score bracket filter: 'all' | 4 | 3 | 2 | 1 | 0
+  const [selectedScoreBracket, setSelectedScoreBracket] = useState<'all' | number>('all');
+
+  // Realtime subscription to tournament cloud state (schedule, scores, completion)
+  useEffect(() => {
+    const unsubscribe = subscribeToTournamentState(
+      (cloudState) => {
+        if (cloudState) {
+          if (cloudState.courtSchedule) {
+            setCourtSchedule(cloudState.courtSchedule);
+          }
+          if (cloudState.matchScores) {
+            setMatchScores(cloudState.matchScores);
+          }
+          if (cloudState.updatedAt) {
+            setLastCloudSyncTime(new Date(cloudState.updatedAt).toLocaleTimeString('zh-TW'));
+          }
+        }
+      },
+      (err) => {
+        console.warn('Realtime tournament sync error:', err);
+      }
+    );
+    return () => unsubscribe();
+  }, []);
+
   // Roster search and filters
   const [searchQuery, setSearchQuery] = useState('');
   const [tierFilter, setTierFilter] = useState<string>('all');
@@ -162,7 +193,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [players, searchQuery, tierFilter, genderFilter, sortField, sortOrder]);
 
   // Execute 3-court schedule generation (Strict 5-player rule: 4 matches, zero duplicate partners)
-  const handleGenerateCourtSchedule = () => {
+  const handleGenerateCourtSchedule = async () => {
     const validation = validateFivePlayerRule(players);
     if (!validation.isValid) {
       setFivePlayerValidationError(validation);
@@ -172,6 +203,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const result = generateFourMatchCourtSchedule(players);
     setCourtSchedule(result);
     setActiveAdminTab('schedule');
+    setIsCloudSyncing(true);
+    try {
+      await saveTournamentState(result, matchScores);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed saving generated schedule to cloud:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
   };
 
   // Preload demo players (15 players = 3 groups of 5)
@@ -278,37 +318,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setNewPlayerLevel(0);
   };
 
-  // Update match score in schedule (Strictly 0 or 1 for winning count, default 0)
-  const handleUpdateMatchScore = (matchId: string, team: 'A' | 'B', score: number) => {
-    const clampedScore = score === 1 ? 1 : 0;
-    setMatchScores((prev) => {
-      const current = prev[matchId] || { scoreA: 0, scoreB: 0, completed: false };
-      return {
-        ...prev,
-        [matchId]: {
-          scoreA: current.scoreA ?? 0,
-          scoreB: current.scoreB ?? 0,
-          completed: current.completed ?? false,
-          ...current,
-          [team === 'A' ? 'scoreA' : 'scoreB']: clampedScore,
-        },
-      };
-    });
+  // Update match score in schedule (Strictly 0 or 1, mutually exclusive, locked if completed, auto cloud-saved)
+  const handleUpdateMatchScore = async (matchId: string, team: 'A' | 'B', score: number) => {
+    const current = matchScores[matchId] || { scoreA: 0, scoreB: 0, completed: false };
+    if (current.completed) return; // Locked when completed!
+
+    let nextA = current.scoreA ?? 0;
+    let nextB = current.scoreB ?? 0;
+
+    if (team === 'A') {
+      if (score === 1) {
+        nextA = 1;
+        nextB = 0; // Mutually exclusive: Team B cannot also be 1
+      } else {
+        nextA = 0;
+      }
+    } else {
+      if (score === 1) {
+        nextB = 1;
+        nextA = 0; // Mutually exclusive: Team A cannot also be 1
+      } else {
+        nextB = 0;
+      }
+    }
+
+    const updated = {
+      ...matchScores,
+      [matchId]: {
+        ...current,
+        scoreA: nextA,
+        scoreB: nextB,
+      },
+    };
+    setMatchScores(updated);
+    try {
+      await saveTournamentState(courtSchedule, updated);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed saving score to cloud:', err);
+    }
   };
 
-  const handleToggleMatchComplete = (matchId: string) => {
-    setMatchScores((prev) => {
-      const current = prev[matchId] || { scoreA: 0, scoreB: 0, completed: false };
-      return {
-        ...prev,
-        [matchId]: {
-          scoreA: current.scoreA ?? 0,
-          scoreB: current.scoreB ?? 0,
-          ...current,
-          completed: !current.completed,
-        },
-      };
-    });
+  const handleToggleMatchComplete = async (matchId: string) => {
+    const current = matchScores[matchId] || { scoreA: 0, scoreB: 0, completed: false };
+    const nextCompleted = !current.completed;
+    const updated = {
+      ...matchScores,
+      [matchId]: {
+        scoreA: current.scoreA ?? 0,
+        scoreB: current.scoreB ?? 0,
+        ...current,
+        completed: nextCompleted,
+      },
+    };
+    setMatchScores(updated);
+    try {
+      await saveTournamentState(courtSchedule, updated);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed saving completion to cloud:', err);
+    }
   };
 
   // Copy schedule text to clipboard
@@ -563,18 +632,28 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </h1>
           </div>
 
-          {/* Top Right Action: Lock Admin */}
-          {onLockAdmin && (
-            <button
-              type="button"
-              onClick={onLockAdmin}
-              title="重新鎖定後台"
-              className="px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 self-start md:self-auto"
-            >
-              <Lock className="w-3.5 h-3.5" />
-              <span>鎖定後台</span>
-            </button>
-          )}
+          {/* Top Right Action: Cloud Sync Status & Lock Admin */}
+          <div className="flex items-center gap-2 flex-wrap shrink-0 self-start md:self-auto">
+            <div className="px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/90 text-emerald-900 text-xs font-semibold flex items-center gap-1.5 shadow-2xs">
+              <span className={`w-2 h-2 rounded-full ${isCloudSyncing ? 'bg-amber-500 animate-ping' : 'bg-emerald-500 animate-pulse'}`} />
+              <span>{isCloudSyncing ? '雲端同步存檔中...' : '雲端自動存檔'}</span>
+              <span className="text-[11px] text-emerald-700 font-normal">
+                {lastCloudSyncTime ? `(即時同步 ${lastCloudSyncTime})` : '(跨裝置已連線)'}
+              </span>
+            </div>
+
+            {onLockAdmin && (
+              <button
+                type="button"
+                onClick={onLockAdmin}
+                title="重新鎖定後台"
+                className="px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>鎖定後台</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* 5-Player Tournament Rule Live Status Bar */}
@@ -1062,9 +1141,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <div className="flex items-center gap-1 shrink-0">
                                   <button
                                     type="button"
+                                    disabled={isDone}
                                     onClick={() => handleUpdateMatchScore(match.id, 'A', 0)}
-                                    title="0 分 (未得勝場)"
-                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                                    title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
+                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                      isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                    } ${
                                       scoreA === 0
                                         ? 'bg-slate-700 text-white shadow-xs'
                                         : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
@@ -1074,9 +1156,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   </button>
                                   <button
                                     type="button"
+                                    disabled={isDone}
                                     onClick={() => handleUpdateMatchScore(match.id, 'A', 1)}
-                                    title="1 分 (獲勝 1 場)"
-                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                                    title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
+                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                      isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                    } ${
                                       scoreA === 1
                                         ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400'
                                         : 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
@@ -1130,9 +1215,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <div className="flex items-center gap-1 shrink-0">
                                   <button
                                     type="button"
+                                    disabled={isDone}
                                     onClick={() => handleUpdateMatchScore(match.id, 'B', 0)}
-                                    title="0 分 (未得勝場)"
-                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                                    title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
+                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                      isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                    } ${
                                       scoreB === 0
                                         ? 'bg-slate-700 text-white shadow-xs'
                                         : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
@@ -1142,9 +1230,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   </button>
                                   <button
                                     type="button"
+                                    disabled={isDone}
                                     onClick={() => handleUpdateMatchScore(match.id, 'B', 1)}
-                                    title="1 分 (獲勝 1 場)"
-                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                                    title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
+                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                      isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                    } ${
                                       scoreB === 1
                                         ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-400'
                                         : 'bg-white border border-blue-300 text-blue-700 hover:bg-blue-50'
@@ -1169,8 +1260,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               >
                                 {isDone ? (
                                   <>
-                                    <CheckCircle2 className="w-4 h-4" />
-                                    <span>✓ 本場已完賽 (點擊可重新標記)</span>
+                                    <Lock className="w-3.5 h-3.5 text-emerald-200" />
+                                    <span>✓ 本場已完賽 · 比分已鎖定 (點擊解鎖修改分數)</span>
                                   </>
                                 ) : (
                                   <>
@@ -1450,21 +1541,146 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* Scores Table / Cards Display */}
-          <div className="space-y-3">
-            {playerScoreStats
-              .filter((s) => {
-                if (!scoreSearchQuery.trim()) return true;
-                const q = scoreSearchQuery.toLowerCase();
+          {/* Score Bracket Filter Navigation */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-bold text-slate-500">獎金組別：</span>
+            <button
+              type="button"
+              onClick={() => setSelectedScoreBracket('all')}
+              className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer ${
+                selectedScoreBracket === 'all'
+                  ? 'bg-slate-900 text-white shadow-xs'
+                  : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              全部組別 (共 {playerScoreStats.length} 人)
+            </button>
+            {[4, 3, 2, 1, 0].map((pts) => {
+              const count = playerScoreStats.filter((s) => s.totalPointsWon === pts).length;
+              const label =
+                pts === 4
+                  ? '🏆 4 分全勝組'
+                  : pts === 3
+                  ? '🥈 3 分優勝組'
+                  : pts === 2
+                  ? '🥉 2 分均勢組'
+                  : pts === 1
+                  ? '🏅 1 分努力組'
+                  : '🎖️ 0 分同樂組';
+              return (
+                <button
+                  key={pts}
+                  type="button"
+                  onClick={() => setSelectedScoreBracket(pts)}
+                  className={`px-3 py-1.5 text-xs font-bold rounded-xl transition-all cursor-pointer flex items-center gap-1 ${
+                    selectedScoreBracket === pts
+                      ? 'bg-amber-600 text-white shadow-xs ring-2 ring-amber-300'
+                      : 'bg-white border border-slate-200 text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  <span>{label}</span>
+                  <span
+                    className={`px-1.5 py-0.2 rounded-full text-[10px] font-mono ${
+                      selectedScoreBracket === pts
+                        ? 'bg-amber-800 text-amber-100'
+                        : 'bg-slate-100 text-slate-700 font-bold'
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Scores Table / Grouped Cards Display */}
+          <div className="space-y-6">
+            {[
+              {
+                points: 4,
+                title: '【4 分滿貫冠軍獎金組】',
+                subtitle: '4 戰全勝 · 勝率 100% · 榮膺最高獎金榮譽',
+                icon: '🥇',
+                headerClass: 'bg-gradient-to-r from-amber-500 via-amber-600 to-yellow-500 text-white',
+              },
+              {
+                points: 3,
+                title: '【3 分優勝獎金組】',
+                subtitle: '3 勝 1 敗 · 勝率 75% · 戰力卓越',
+                icon: '🥈',
+                headerClass: 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white',
+              },
+              {
+                points: 2,
+                title: '【2 分均勢獎金組】',
+                subtitle: '2 勝 2 敗 · 勝率 50% · 旗鼓相當',
+                icon: '🥉',
+                headerClass: 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white',
+              },
+              {
+                points: 1,
+                title: '【1 分努力獎勵組】',
+                subtitle: '1 勝 3 敗 · 勝率 25% · 拼勁十足',
+                icon: '🏅',
+                headerClass: 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white',
+              },
+              {
+                points: 0,
+                title: '【0 分同樂獎勵組】',
+                subtitle: '0 勝 4 敗 · 志在參加 · 歡樂健康打羽球',
+                icon: '🎖️',
+                headerClass: 'bg-gradient-to-r from-slate-600 to-slate-700 text-white',
+              },
+            ]
+              .filter((bracket) => selectedScoreBracket === 'all' || selectedScoreBracket === bracket.points)
+              .map((bracket) => {
+                const groupPlayers = playerScoreStats
+                  .filter((s) => s.totalPointsWon === bracket.points)
+                  .filter((s) => {
+                    if (!scoreSearchQuery.trim()) return true;
+                    const q = scoreSearchQuery.toLowerCase();
+                    return (
+                      s.player.name.toLowerCase().includes(q) ||
+                      s.player.email.toLowerCase().includes(q)
+                    );
+                  });
+
                 return (
-                  s.player.name.toLowerCase().includes(q) ||
-                  s.player.email.toLowerCase().includes(q)
-                );
-              })
-              .map((stat, index) => {
-                const rank = index + 1;
-                const isExpanded = expandedScorePlayerId === stat.player.id;
-                const tier = getTierByLevel(stat.player.level);
+                  <div key={bracket.points} className="space-y-3">
+                    {/* Bracket Header Banner */}
+                    <div
+                      className={`rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-xs ${bracket.headerClass}`}
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="text-2xl shrink-0">{bracket.icon}</span>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="font-black text-base tracking-tight">{bracket.title}</h3>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-white/20 backdrop-blur-xs">
+                              {bracket.points} 分組
+                            </span>
+                          </div>
+                          <p className="text-xs text-white/90 mt-0.5">{bracket.subtitle}</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0 self-start sm:self-auto">
+                        <span className="px-3 py-1 rounded-xl text-xs font-black bg-white text-slate-900 shadow-xs">
+                          本組共 {groupPlayers.length} 位選手
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Players in this score bracket */}
+                    {groupPlayers.length === 0 ? (
+                      <div className="p-4 bg-slate-50/70 border border-dashed border-slate-200 rounded-xl text-center text-xs text-slate-400">
+                        目前此組別尚未有選手累積為 {bracket.points} 分積分（賽程進行中將即時自動更新分組）
+                      </div>
+                    ) : (
+                      <div className="space-y-2.5">
+                        {groupPlayers.map((stat, index) => {
+                          const rank = index + 1;
+                          const isExpanded = expandedScorePlayerId === stat.player.id;
+                          const tier = getTierByLevel(stat.player.level);
 
                 return (
                   <div
@@ -1671,12 +1887,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         )}
                       </div>
                     )}
-                  </div>
-                );
-              })}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })}
+  </div>
+</div>
+)}
 
       {/* Tab 2: Full Player Roster & Quick Level Adjust */}
       {activeAdminTab === 'roster' && (
@@ -2022,48 +2243,74 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </p>
             )}
 
-            {/* Printable Individual Score Leaderboard Table */}
-            {courtSchedule && courtSchedule.rounds.length > 0 && playerScoreStats.some((s) => s.totalPointsWon > 0 || s.matchesPlayed > 0) && (
-              <div className="pt-4 border-t-2 border-slate-900 space-y-3">
+            {/* Printable Individual Score Leaderboard Table (By Score Brackets) */}
+            {courtSchedule && courtSchedule.rounds.length > 0 && (
+              <div className="pt-4 border-t-2 border-slate-900 space-y-4">
                 <div className="flex items-center justify-between">
                   <h3 className="font-black text-base text-slate-900">
-                    🏆 選手個人累積得分獎金公告榜
+                    🏆 選手個人勝場得分與獎金組別公告榜 (4分組、3分組、2分組、1分組、0分組)
                   </h3>
                   <span className="text-xs text-slate-500">
-                    計分標準：雙打比賽 · 個人累積總得分發放獎金
+                    賽制：每人打滿 4 場 · 1 勝得 1 分 · 獎金依勝場積分組別頒發
                   </span>
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left text-xs border border-slate-300">
-                    <thead className="bg-slate-100 border-b border-slate-300 font-bold">
-                      <tr>
-                        <th className="py-2 px-3">排名</th>
-                        <th className="py-2 px-3">選手姓名</th>
-                        <th className="py-2 px-3">戰力級數</th>
-                        <th className="py-2 px-3">所屬循環組</th>
-                        <th className="py-2 px-3 text-right">個人總得分 (獎金)</th>
-                        <th className="py-2 px-3 text-right">總失分</th>
-                        <th className="py-2 px-3 text-right">淨勝分差</th>
-                        <th className="py-2 px-3 text-center">戰績</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {playerScoreStats.map((s, idx) => (
-                        <tr key={s.player.id}>
-                          <td className="py-1.5 px-3 font-bold">{idx + 1}</td>
-                          <td className="py-1.5 px-3 font-extrabold">{s.player.name}</td>
-                          <td className="py-1.5 px-3">Lv {s.player.level}</td>
-                          <td className="py-1.5 px-3 text-slate-600">{s.tierGroupLabel || '-'}</td>
-                          <td className="py-1.5 px-3 text-right font-black text-amber-700">{s.totalPointsWon}</td>
-                          <td className="py-1.5 px-3 text-right text-slate-600">{s.totalPointsLost}</td>
-                          <td className="py-1.5 px-3 text-right font-bold">
-                            {s.pointDifferential > 0 ? `+${s.pointDifferential}` : s.pointDifferential}
-                          </td>
-                          <td className="py-1.5 px-3 text-center">{s.wins}勝{s.losses}敗</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+
+                <div className="space-y-4">
+                  {[4, 3, 2, 1, 0].map((pts) => {
+                    const groupPlayers = playerScoreStats.filter((s) => s.totalPointsWon === pts);
+                    if (groupPlayers.length === 0) return null;
+                    const groupTitle =
+                      pts === 4
+                        ? '🥇【4 分滿貫冠軍獎金組 · 4 戰全勝】'
+                        : pts === 3
+                        ? '🥈【3 分優勝獎金組 · 3 勝 1 敗】'
+                        : pts === 2
+                        ? '🥉【2 分均勢獎金組 · 2 勝 2 敗】'
+                        : pts === 1
+                        ? '🏅【1 分努力獎勵組 · 1 勝 3 敗】'
+                        : '🎖️【0 分同樂獎勵組 · 0 勝 4 敗】';
+
+                    return (
+                      <div key={pts} className="border border-slate-300 rounded-lg overflow-hidden">
+                        <div className="bg-slate-100 px-3 py-1.5 font-black text-xs text-slate-800 flex items-center justify-between">
+                          <span>{groupTitle}</span>
+                          <span>本組共 {groupPlayers.length} 位選手</span>
+                        </div>
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs">
+                            <thead className="bg-slate-50 border-b border-slate-200 text-[11px] font-bold text-slate-600">
+                              <tr>
+                                <th className="py-1.5 px-3">序號</th>
+                                <th className="py-1.5 px-3">選手姓名</th>
+                                <th className="py-1.5 px-3">戰力級數</th>
+                                <th className="py-1.5 px-3">所屬循環組</th>
+                                <th className="py-1.5 px-3 text-right">個人勝場 (積分)</th>
+                                <th className="py-1.5 px-3 text-right">總失分</th>
+                                <th className="py-1.5 px-3 text-right">淨勝差</th>
+                                <th className="py-1.5 px-3 text-center">戰績</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-200">
+                              {groupPlayers.map((s, idx) => (
+                                <tr key={s.player.id}>
+                                  <td className="py-1.5 px-3 font-bold">{idx + 1}</td>
+                                  <td className="py-1.5 px-3 font-extrabold">{s.player.name}</td>
+                                  <td className="py-1.5 px-3">Lv {s.player.level}</td>
+                                  <td className="py-1.5 px-3 text-slate-600">{s.tierGroupLabel || '-'}</td>
+                                  <td className="py-1.5 px-3 text-right font-black text-amber-700">{s.totalPointsWon} 分</td>
+                                  <td className="py-1.5 px-3 text-right text-slate-600">{s.totalPointsLost}</td>
+                                  <td className="py-1.5 px-3 text-right font-bold">
+                                    {s.pointDifferential > 0 ? `+${s.pointDifferential}` : s.pointDifferential}
+                                  </td>
+                                  <td className="py-1.5 px-3 text-center">{s.wins}勝{s.losses}敗</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             )}
