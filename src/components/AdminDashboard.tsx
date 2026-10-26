@@ -1020,12 +1020,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {scheduleViewMode === 'byRound' && courtSchedule && (
             <div className="space-y-4 sm:space-y-6">
               {courtSchedule.rounds.map((round) => {
-                const matchesToShow =
-                  selectedCourtFilter === 0
-                    ? round.matches
-                    : round.matches.filter((m) => m.courtNumber === selectedCourtFilter);
+                // If a specific court filter is selected, check if this round has matches on that court
+                const courtsToRender =
+                  selectedCourtFilter === 0 ? [1, 2, 3] : [selectedCourtFilter];
 
-                if (matchesToShow.length === 0 && selectedCourtFilter !== 0) {
+                if (
+                  selectedCourtFilter !== 0 &&
+                  !round.matches.some((m) => m.courtNumber === selectedCourtFilter)
+                ) {
                   return null;
                 }
 
@@ -1044,7 +1046,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           第 {round.roundNumber} 輪次對戰 (Round {round.roundNumber})
                         </h4>
                         <span className="text-[11px] text-slate-500 hidden sm:inline">
-                          · 同時進行最多 3 場雙打
+                          · 一列三場地排程
                         </span>
                       </div>
 
@@ -1059,220 +1061,274 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       )}
                     </div>
 
-                    {/* Court Matches Grid (3 Courts) */}
-                    <div className="p-3 sm:p-5 grid grid-cols-1 lg:grid-cols-3 gap-3 sm:gap-4">
-                      {matchesToShow.map((match) => {
-                        const scoreData = matchScores[match.id] || {};
-                        const isDone = Boolean(scoreData.completed);
-                        const scoreA = Number(scoreData.scoreA) === 1 ? 1 : 0;
-                        const scoreB = Number(scoreData.scoreB) === 1 ? 1 : 0;
+                    {/* Court Matches Grid (Strictly 3 Courts in One Row) */}
+                    <div className="overflow-x-auto pb-1">
+                      <div
+                        className={`p-3 sm:p-5 gap-3 sm:gap-4 ${
+                          selectedCourtFilter === 0
+                            ? 'grid grid-cols-3 min-w-[780px] lg:min-w-0'
+                            : 'grid grid-cols-1'
+                        }`}
+                      >
+                        {courtsToRender.map((courtNum) => {
+                          const match = round.matches.find((m) => m.courtNumber === courtNum);
 
-                        return (
-                          <div
-                            key={match.id}
-                            className={`rounded-2xl transition-all flex flex-col justify-between p-4 space-y-3.5 ${
-                              isDone
-                                ? 'bg-emerald-50/90 border-2 border-emerald-500 shadow-md ring-2 ring-emerald-500/20'
-                                : 'bg-white border border-slate-200 hover:border-slate-300 shadow-xs'
-                            }`}
-                          >
-                            {/* Court Number Tag, Tier label & Live Status */}
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span
-                                  className={`px-2.5 py-0.5 rounded-lg text-xs font-black flex items-center gap-1 ${
-                                    isDone ? 'bg-emerald-800 text-white' : 'bg-slate-900 text-white'
+                          // If there's no match scheduled for this court in this round (e.g., Court 3 when 10 players),
+                          // render an idle standby card so Court 3 is never missing and the 3-court row layout is maintained!
+                          if (!match) {
+                            return (
+                              <div
+                                key={`empty-court-${courtNum}`}
+                                className="rounded-2xl border-2 border-dashed border-slate-200 bg-slate-50/70 p-4 flex flex-col justify-between space-y-3.5 min-h-[290px]"
+                              >
+                                {/* Court Number Tag & Status */}
+                                <div className="flex items-center justify-between">
+                                  <div className="flex items-center gap-2">
+                                    <span className="px-2.5 py-0.5 rounded-lg text-xs font-black bg-slate-200 text-slate-700 flex items-center gap-1">
+                                      <span>場地 {courtNum}</span>
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                                      輪空待命
+                                    </span>
+                                  </div>
+                                  <span className="text-[11px] text-slate-400 font-medium">
+                                    本輪無排程賽事
+                                  </span>
+                                </div>
+
+                                {/* Idle Visual */}
+                                <div className="my-auto py-6 text-center space-y-1.5">
+                                  <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center mx-auto text-slate-400 text-lg">
+                                    🏸
+                                  </div>
+                                  <p className="text-xs font-bold text-slate-700">場地 {courtNum} · 本輪輪空待命中</p>
+                                  <p className="text-[11px] text-slate-400 max-w-[200px] mx-auto leading-relaxed">
+                                    目前參賽組數未排滿第 {courtNum} 場地，場地空堂保留中
+                                  </p>
+                                </div>
+
+                                {/* Bottom Info */}
+                                <div className="pt-2 border-t border-slate-200/60 text-center">
+                                  <span className="text-[10px] text-slate-400 font-medium">
+                                    可作為選手熱身或彈性調配場地
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          }
+
+                          const scoreData = matchScores[match.id] || {};
+                          const isDone = Boolean(scoreData.completed);
+                          const scoreA = Number(scoreData.scoreA) === 1 ? 1 : 0;
+                          const scoreB = Number(scoreData.scoreB) === 1 ? 1 : 0;
+
+                          return (
+                            <div
+                              key={match.id}
+                              className={`rounded-2xl transition-all flex flex-col justify-between p-4 space-y-3.5 ${
+                                isDone
+                                  ? 'bg-emerald-50/90 border-2 border-emerald-500 shadow-md ring-2 ring-emerald-500/20'
+                                  : 'bg-white border border-slate-200 hover:border-slate-300 shadow-xs'
+                              }`}
+                            >
+                              {/* Court Number Tag, Tier label & Live Status */}
+                              <div className="flex items-center justify-between">
+                                <div className="flex items-center gap-2">
+                                  <span
+                                    className={`px-2.5 py-0.5 rounded-lg text-xs font-black flex items-center gap-1 ${
+                                      isDone ? 'bg-emerald-800 text-white' : 'bg-slate-900 text-white'
+                                    }`}
+                                  >
+                                    <span>場地 {match.courtNumber}</span>
+                                  </span>
+                                  {isDone ? (
+                                    <span className="px-2 py-0.5 rounded-md text-[11px] font-black bg-emerald-600 text-white flex items-center gap-1 shadow-2xs">
+                                      <CheckCircle2 className="w-3.5 h-3.5" />
+                                      <span>✓ 已完賽</span>
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                                      進行中 / 待比
+                                    </span>
+                                  )}
+                                </div>
+                                <span className="text-[11px] text-slate-500 font-medium truncate max-w-[140px]">
+                                  {match.tierGroupLabel}
+                                </span>
+                              </div>
+
+                              {/* Versus Battle Block */}
+                              <div className="space-y-2">
+                                {/* Team A */}
+                                <div
+                                  className={`p-2.5 rounded-xl flex items-center justify-between transition-all ${
+                                    isDone
+                                      ? scoreA === 1
+                                        ? 'bg-emerald-100 border-2 border-emerald-500 shadow-2xs'
+                                        : 'bg-white/80 border border-slate-200 opacity-70'
+                                      : 'bg-emerald-50/70 border border-emerald-200/80'
                                   }`}
                                 >
-                                  <span>場地 {match.courtNumber}</span>
-                                </span>
-                                {isDone ? (
-                                  <span className="px-2 py-0.5 rounded-md text-[11px] font-black bg-emerald-600 text-white flex items-center gap-1 shadow-2xs">
-                                    <CheckCircle2 className="w-3.5 h-3.5" />
-                                    <span>✓ 已完賽</span>
-                                  </span>
-                                ) : (
-                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
-                                    進行中 / 待比
-                                  </span>
-                                )}
-                              </div>
-                              <span className="text-[11px] text-slate-500 font-medium truncate max-w-[140px]">
-                                {match.tierGroupLabel}
-                              </span>
-                            </div>
-
-                            {/* Versus Battle Block */}
-                            <div className="space-y-2">
-                              {/* Team A */}
-                              <div
-                                className={`p-2.5 rounded-xl flex items-center justify-between transition-all ${
-                                  isDone
-                                    ? scoreA === 1
-                                      ? 'bg-emerald-100 border-2 border-emerald-500 shadow-2xs'
-                                      : 'bg-white/80 border border-slate-200 opacity-70'
-                                    : 'bg-emerald-50/70 border border-emerald-200/80'
-                                }`}
-                              >
-                                <div className="space-y-0.5 truncate pr-2">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-[10px] font-black text-emerald-800 uppercase block">
-                                      隊伍 A
-                                    </span>
-                                    {isDone && scoreA === 1 && (
-                                      <span className="px-1.5 py-0.2 bg-emerald-600 text-white text-[9px] font-black rounded">
-                                        🏆 勝出
+                                  <div className="space-y-0.5 truncate pr-2">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[10px] font-black text-emerald-800 uppercase block">
+                                        隊伍 A
                                       </span>
-                                    )}
-                                  </div>
-                                  <div className="text-xs font-extrabold text-slate-900 truncate">
-                                    {match.teamA[0].name}{' '}
-                                    <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
-                                      Lv{match.teamA[0].level}
-                                    </span>{' '}
-                                    & {match.teamA[1].name}{' '}
-                                    <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
-                                      Lv{match.teamA[1].level}
-                                    </span>
-                                  </div>
-                                </div>
-
-                                {/* Score 0 / 1 Selector */}
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <button
-                                    type="button"
-                                    disabled={isDone}
-                                    onClick={() => handleUpdateMatchScore(match.id, 'A', 0)}
-                                    title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
-                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                      isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                    } ${
-                                      scoreA === 0
-                                        ? 'bg-slate-700 text-white shadow-xs'
-                                        : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
-                                    }`}
-                                  >
-                                    0
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={isDone}
-                                    onClick={() => handleUpdateMatchScore(match.id, 'A', 1)}
-                                    title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
-                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                      isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                    } ${
-                                      scoreA === 1
-                                        ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400'
-                                        : 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
-                                    }`}
-                                  >
-                                    1
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="text-center">
-                                <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
-                                  VS
-                                </span>
-                              </div>
-
-                              {/* Team B */}
-                              <div
-                                className={`p-2.5 rounded-xl flex items-center justify-between transition-all ${
-                                  isDone
-                                    ? scoreB === 1
-                                      ? 'bg-blue-100 border-2 border-blue-500 shadow-2xs'
-                                      : 'bg-white/80 border border-slate-200 opacity-70'
-                                    : 'bg-blue-50/70 border border-blue-200/80'
-                                }`}
-                              >
-                                <div className="space-y-0.5 truncate pr-2">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="text-[10px] font-black text-blue-800 uppercase block">
-                                      隊伍 B
-                                    </span>
-                                    {isDone && scoreB === 1 && (
-                                      <span className="px-1.5 py-0.2 bg-blue-600 text-white text-[9px] font-black rounded">
-                                        🏆 勝出
+                                      {isDone && scoreA === 1 && (
+                                        <span className="px-1.5 py-0.2 bg-emerald-600 text-white text-[9px] font-black rounded">
+                                          🏆 勝出
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-xs font-extrabold text-slate-900 truncate">
+                                      {match.teamA[0].name}{' '}
+                                      <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
+                                        Lv{match.teamA[0].level}
+                                      </span>{' '}
+                                      & {match.teamA[1].name}{' '}
+                                      <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
+                                        Lv{match.teamA[1].level}
                                       </span>
-                                    )}
+                                    </div>
                                   </div>
-                                  <div className="text-xs font-extrabold text-slate-900 truncate">
-                                    {match.teamB[0].name}{' '}
-                                    <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
-                                      Lv{match.teamB[0].level}
-                                    </span>{' '}
-                                    & {match.teamB[1].name}{' '}
-                                    <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
-                                      Lv{match.teamB[1].level}
-                                    </span>
+
+                                  {/* Score 0 / 1 Selector */}
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      disabled={isDone}
+                                      onClick={() => handleUpdateMatchScore(match.id, 'A', 0)}
+                                      title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
+                                      className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                        isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                      } ${
+                                        scoreA === 0
+                                          ? 'bg-slate-700 text-white shadow-xs'
+                                          : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      0
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isDone}
+                                      onClick={() => handleUpdateMatchScore(match.id, 'A', 1)}
+                                      title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
+                                      className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                        isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                      } ${
+                                        scoreA === 1
+                                          ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400'
+                                          : 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                                      }`}
+                                    >
+                                      1
+                                    </button>
                                   </div>
                                 </div>
 
-                                {/* Score 0 / 1 Selector */}
-                                <div className="flex items-center gap-1 shrink-0">
-                                  <button
-                                    type="button"
-                                    disabled={isDone}
-                                    onClick={() => handleUpdateMatchScore(match.id, 'B', 0)}
-                                    title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
-                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                      isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                    } ${
-                                      scoreB === 0
-                                        ? 'bg-slate-700 text-white shadow-xs'
-                                        : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
-                                    }`}
-                                  >
-                                    0
-                                  </button>
-                                  <button
-                                    type="button"
-                                    disabled={isDone}
-                                    onClick={() => handleUpdateMatchScore(match.id, 'B', 1)}
-                                    title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
-                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                      isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                    } ${
-                                      scoreB === 1
-                                        ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-400'
-                                        : 'bg-white border border-blue-300 text-blue-700 hover:bg-blue-50'
-                                    }`}
-                                  >
-                                    1
-                                  </button>
+                                <div className="text-center">
+                                  <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                                    VS
+                                  </span>
+                                </div>
+
+                                {/* Team B */}
+                                <div
+                                  className={`p-2.5 rounded-xl flex items-center justify-between transition-all ${
+                                    isDone
+                                      ? scoreB === 1
+                                        ? 'bg-blue-100 border-2 border-blue-500 shadow-2xs'
+                                        : 'bg-white/80 border border-slate-200 opacity-70'
+                                      : 'bg-blue-50/70 border border-blue-200/80'
+                                  }`}
+                                >
+                                  <div className="space-y-0.5 truncate pr-2">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-[10px] font-black text-blue-800 uppercase block">
+                                        隊伍 B
+                                      </span>
+                                      {isDone && scoreB === 1 && (
+                                        <span className="px-1.5 py-0.2 bg-blue-600 text-white text-[9px] font-black rounded">
+                                          🏆 勝出
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-xs font-extrabold text-slate-900 truncate">
+                                      {match.teamB[0].name}{' '}
+                                      <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
+                                        Lv{match.teamB[0].level}
+                                      </span>{' '}
+                                      & {match.teamB[1].name}{' '}
+                                      <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
+                                        Lv{match.teamB[1].level}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Score 0 / 1 Selector */}
+                                  <div className="flex items-center gap-1 shrink-0">
+                                    <button
+                                      type="button"
+                                      disabled={isDone}
+                                      onClick={() => handleUpdateMatchScore(match.id, 'B', 0)}
+                                      title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
+                                      className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                        isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                      } ${
+                                        scoreB === 0
+                                          ? 'bg-slate-700 text-white shadow-xs'
+                                          : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
+                                      }`}
+                                    >
+                                      0
+                                    </button>
+                                    <button
+                                      type="button"
+                                      disabled={isDone}
+                                      onClick={() => handleUpdateMatchScore(match.id, 'B', 1)}
+                                      title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
+                                      className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                        isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                      } ${
+                                        scoreB === 1
+                                          ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-400'
+                                          : 'bg-white border border-blue-300 text-blue-700 hover:bg-blue-50'
+                                      }`}
+                                    >
+                                      1
+                                    </button>
+                                  </div>
                                 </div>
                               </div>
-                            </div>
 
-                            {/* Prominent Match Completion Toggle Button */}
-                            <div className="pt-2 border-t border-slate-200/80">
-                              <button
-                                type="button"
-                                onClick={() => handleToggleMatchComplete(match.id)}
-                                className={`w-full py-2 px-3 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
-                                  isDone
-                                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white ring-2 ring-emerald-400'
-                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
-                                }`}
-                              >
-                                {isDone ? (
-                                  <>
-                                    <Lock className="w-3.5 h-3.5 text-emerald-200" />
-                                    <span>✓ 本場已完賽 · 比分已鎖定 (點擊解鎖修改分數)</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <span>標記此場完賽</span>
-                                  </>
-                                )}
-                              </button>
+                              {/* Prominent Match Completion Toggle Button */}
+                              <div className="pt-2 border-t border-slate-200/80">
+                                <button
+                                  type="button"
+                                  onClick={() => handleToggleMatchComplete(match.id)}
+                                  className={`w-full py-2 px-3 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
+                                    isDone
+                                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white ring-2 ring-emerald-400'
+                                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                                  }`}
+                                >
+                                  {isDone ? (
+                                    <>
+                                      <Lock className="w-3.5 h-3.5 text-emerald-200" />
+                                      <span>✓ 本場已完賽 · 比分已鎖定 (點擊解鎖修改分數)</span>
+                                    </>
+                                  ) : (
+                                    <>
+                                      <span>標記此場完賽</span>
+                                    </>
+                                  )}
+                                </button>
+                              </div>
                             </div>
-                          </div>
-                        );
-                      })}
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 );
@@ -2218,21 +2274,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </span>
                       )}
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
-                      {round.matches.map((m) => (
-                        <div key={m.id} className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
-                          <span className="font-bold text-slate-800 block text-[11px]">
-                            場地 {m.courtNumber} ({m.tierGroupLabel})
-                          </span>
-                          <div className="font-semibold text-slate-900">
-                            {m.teamA[0].name} & {m.teamA[1].name}
+                    <div className="grid grid-cols-3 gap-3 text-xs">
+                      {[1, 2, 3].map((cNum) => {
+                        const m = round.matches.find((match) => match.courtNumber === cNum);
+                        if (!m) {
+                          return (
+                            <div
+                              key={`print-idle-${cNum}`}
+                              className="p-3 bg-slate-50/60 rounded-lg border border-dashed border-slate-300 space-y-1 flex flex-col items-center justify-center min-h-[90px] text-center"
+                            >
+                              <span className="font-bold text-slate-500 block text-[11px]">
+                                場地 {cNum}
+                              </span>
+                              <span className="text-[11px] text-slate-400">本輪輪空待命</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <div key={m.id} className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
+                            <span className="font-bold text-slate-800 block text-[11px]">
+                              場地 {m.courtNumber} ({m.tierGroupLabel})
+                            </span>
+                            <div className="font-semibold text-slate-900">
+                              {m.teamA[0].name} & {m.teamA[1].name}
+                            </div>
+                            <div className="text-slate-400 font-bold text-center">VS</div>
+                            <div className="font-semibold text-slate-900">
+                              {m.teamB[0].name} & {m.teamB[1].name}
+                            </div>
                           </div>
-                          <div className="text-slate-400 font-bold text-center">VS</div>
-                          <div className="font-semibold text-slate-900">
-                            {m.teamB[0].name} & {m.teamB[1].name}
-                          </div>
-                        </div>
-                      ))}
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
