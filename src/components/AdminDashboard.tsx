@@ -1,20 +1,13 @@
 import React, { useState, useMemo, useEffect } from 'react';
 import {
   PlayerSubmission,
-  TournamentGroup,
-  TeamPair,
   TournamentScheduleResult,
   CourtMatch,
   ScheduleRound,
 } from '../types';
 import { BADMINTON_TIERS, getTierByLevel } from '../data/badmintonTiers';
 import { SAMPLE_PLAYERS } from '../data/samplePlayers';
-import {
-  generateBalancedDoubles,
-  generateTieredDivisions,
-  generateBalancedMixedDoubles,
-  exportPlayersToCSV,
-} from '../utils/groupingAlgorithms';
+import { exportPlayersToCSV } from '../utils/groupingAlgorithms';
 import {
   generateFourMatchCourtSchedule,
   validateFivePlayerRule,
@@ -69,8 +62,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onBatchAddPlayers,
   onBatchDeleteSamplePlayers,
 }) => {
-  // Navigation inside Admin: 'schedule' (3-Court) | 'roster' | 'grouping' | 'print'
-  const [activeAdminTab, setActiveAdminTab] = useState<'schedule' | 'roster' | 'grouping' | 'print'>('schedule');
+  // Navigation inside Admin: 'schedule' (3-Court) | 'roster' | 'print'
+  const [activeAdminTab, setActiveAdminTab] = useState<'schedule' | 'roster' | 'print'>('schedule');
 
   // Mobile layout view toggle in Roster ('cards' | 'table')
   const [rosterViewMode, setRosterViewMode] = useState<'cards' | 'table'>('cards');
@@ -107,12 +100,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [genderFilter, setGenderFilter] = useState<string>('all');
   const [sortField, setSortField] = useState<'level' | 'name' | 'time'>('level');
   const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('asc'); // default lowest to highest for tier adjustment
-
-  // Grouping configuration (Classic)
-  const [groupingAlgorithm, setGroupingAlgorithm] = useState<'balanced' | 'tiered' | 'mixed'>('balanced');
-  const [teamsPerGroup, setTeamsPerGroup] = useState<number>(4);
-  const [generatedGroups, setGeneratedGroups] = useState<TournamentGroup[]>([]);
-  const [remainingPlayers, setRemainingPlayers] = useState<PlayerSubmission[]>([]);
 
   // Manual player modal state
   const [isAddPlayerOpen, setIsAddPlayerOpen] = useState(false);
@@ -288,29 +275,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setNewPlayerLevel(0);
   };
 
-  // Execute classic grouping algorithm
-  const handleExecuteClassicGrouping = () => {
-    if (players.length < 2) {
-      alert('選手人數不足（至少需 2 人）！');
-      return;
-    }
-
-    if (groupingAlgorithm === 'balanced') {
-      const { groups, remainingPlayers: leftovers } = generateBalancedDoubles(players, teamsPerGroup);
-      setGeneratedGroups(groups);
-      setRemainingPlayers(leftovers);
-    } else if (groupingAlgorithm === 'tiered') {
-      const { groups, remainingPlayers: leftovers } = generateTieredDivisions(players);
-      setGeneratedGroups(groups);
-      setRemainingPlayers(leftovers);
-    } else if (groupingAlgorithm === 'mixed') {
-      const { groups, remainingPlayers: leftovers } = generateBalancedMixedDoubles(players);
-      setGeneratedGroups(groups);
-      setRemainingPlayers(leftovers);
-    }
-    setActiveAdminTab('grouping');
-  };
-
   // Update match score in schedule
   const handleUpdateMatchScore = (matchId: string, team: 'A' | 'B', score: number) => {
     setMatchScores((prev) => ({
@@ -456,8 +420,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-extrabold text-sm">
                   {fivePlayerStatus.isValid
-                    ? `人數符合 5 人循環制：共 ${players.length} 人（已組成 ${fivePlayerStatus.groupCount} 組，每組 5 位）`
-                    : `人數未符合 5 人循環制：目前 ${players.length} 人（同組規定必須剛好 5 位）`}
+                    ? `人數符合同階級 5 人循環制：共 ${players.length} 人（已組成 ${fivePlayerStatus.groupCount} 組，各階級每組 5 位，絕不跨階）`
+                    : `階級人數未符 5 人循環制：目前 ${players.length} 人（同階級配對人員一定要五位，不可跨階湊人）`}
                 </span>
                 <span
                   className={`px-2 py-0.5 rounded text-[10px] font-bold ${
@@ -471,8 +435,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
               <p className="text-[11px] opacity-85 mt-0.5">
                 {fivePlayerStatus.isValid
-                  ? '數學保證：每組 5 人進行 5 場賽事，每位選手恰出賽 4 場（輪休 1 場），與其餘 4 人各搭檔 1 次（零重複搭檔）。'
-                  : `賽事要求每人出賽 4 場且隊友不重複，依數學定理同組必須為 5 人。請調整名單至 5 的倍數（如 5、10、15、20 人）。`}
+                  ? '四大賽事保證：① 每人打滿 4 場 ② 隊友 0 重複配對 ③ 3 場地零撞場 ④ 每位選手排程至少隔一場輪休'
+                  : '同階級配對人員一定要五位，沒五位就無法成組，且不能跨階配對。請點擊「一鍵排定 3 場地賽程」檢視詳細階級人數缺額。'}
               </p>
             </div>
           </div>
@@ -603,18 +567,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <span className="px-1.5 py-0.2 text-[10px] bg-slate-700 text-slate-100 rounded-full font-black">
             {players.length}
           </span>
-        </button>
-
-        <button
-          onClick={() => setActiveAdminTab('grouping')}
-          className={`py-2 px-3 sm:px-4 text-xs sm:text-sm font-medium rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-            activeAdminTab === 'grouping'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
-        >
-          <Sliders className="w-4 h-4" />
-          <span>傳統雙打平衡分組</span>
         </button>
 
         <button
@@ -1313,93 +1265,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
-      {/* Tab 3: Classic Grouping Options */}
-      {activeAdminTab === 'grouping' && (
-        <div className="space-y-6">
-          <div className="bg-white rounded-2xl p-6 border border-slate-200 shadow-xs space-y-5">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="text-base font-bold text-slate-900">
-                  其他雙打分組策略演算法
-                </h3>
-                <p className="text-xs text-slate-500">
-                  可選擇強弱互補平衡雙打、或男女混雙平衡分組
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={handleExecuteClassicGrouping}
-                className="px-6 py-2.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-md transition-all flex items-center justify-center gap-2 shrink-0 cursor-pointer"
-              >
-                <Sparkles className="w-4 h-4 text-emerald-400" />
-                <span>執行此策略分組</span>
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div
-                onClick={() => setGroupingAlgorithm('balanced')}
-                className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
-                  groupingAlgorithm === 'balanced'
-                    ? 'bg-emerald-50/70 border-emerald-600 ring-2 ring-emerald-500/20'
-                    : 'bg-white border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-emerald-950 flex items-center gap-1.5">
-                    <Sparkles className="w-4 h-4 text-emerald-600" />
-                    強弱互補公平雙打
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  將高階選手與初階/新手搭檔，每組隊伍戰力極為接近。
-                </p>
-              </div>
-
-              <div
-                onClick={() => setGroupingAlgorithm('tiered')}
-                className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
-                  groupingAlgorithm === 'tiered'
-                    ? 'bg-emerald-50/70 border-emerald-600 ring-2 ring-emerald-500/20'
-                    : 'bg-white border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    <Layers className="w-4 h-4 text-blue-600" />
-                    同級實力分組 (甲/乙/丙組)
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  切分成菁英組、挑戰組、新手組，同級對抗。
-                </p>
-              </div>
-
-              <div
-                onClick={() => setGroupingAlgorithm('mixed')}
-                className={`p-4 rounded-xl border text-left cursor-pointer transition-all ${
-                  groupingAlgorithm === 'mixed'
-                    ? 'bg-emerald-50/70 border-emerald-600 ring-2 ring-emerald-500/20'
-                    : 'bg-white border-slate-200 hover:border-slate-300'
-                }`}
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold text-slate-900 flex items-center gap-1.5">
-                    <Users className="w-4 h-4 text-pink-600" />
-                    男女混雙戰力平衡配對
-                  </span>
-                </div>
-                <p className="text-xs text-slate-600 leading-relaxed">
-                  男選手與女選手進行交叉平衡配對。
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Tab 4: Print View */}
+      {/* Tab 3: Print View */}
       {activeAdminTab === 'print' && (
         <div className="space-y-6">
           <div className="bg-white rounded-2xl p-4 border border-slate-200 flex items-center justify-between no-print">
@@ -1569,44 +1435,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* 5-Player Rule Validation Error Modal */}
       {isFivePlayerModalOpen && fivePlayerValidationError && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
-          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-rose-200 overflow-hidden p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-rose-200 overflow-hidden p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150 max-h-[90vh] overflow-y-auto">
             <div className="flex items-start gap-3">
               <div className="w-11 h-11 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 shadow-xs">
                 <AlertTriangle className="w-6 h-6" />
               </div>
               <div className="space-y-1">
                 <h3 className="font-black text-base text-slate-900">
-                  賽程排定失敗：同組配對人員一定要五位
+                  賽程排定失敗：同階級配對人員一定要五位
                 </h3>
                 <p className="text-xs text-rose-600 font-bold">
-                  目前選手總人數：{fivePlayerValidationError.totalPlayers} 位（無法分為每組 5 位）
+                  嚴格禁止跨階配對 · 各階級必須獨立湊滿 5 人（或 5 的倍數）
                 </p>
               </div>
             </div>
 
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-700 space-y-3">
               <div className="font-bold text-slate-900 flex items-center gap-1.5">
-                <span>📌 賽制規則與數學配對限制：</span>
+                <span>📌 各階級選手人數檢查結果：</span>
               </div>
-              <ul className="space-y-1.5 list-disc list-inside text-slate-600 pl-1 leading-relaxed">
-                <li>
-                  <strong className="text-slate-800">每人打四場輪迴賽</strong>：每場 4 人上場雙打（2 對 2）。
-                </li>
-                <li>
-                  <strong className="text-slate-800">隊友完全不重複搭檔</strong>：每人出賽 4 場，必須剛好有 4 位不同搭檔。
-                </li>
-                <li>
-                  <strong className="text-slate-800">同組人員一定要剛好五位</strong>：5 位選手恰有 C(5, 2) = 10 種雙打搭檔組合。5 場賽事（每場 2 對組合）剛好消耗所有 10 種搭檔，且每人恰出賽 4 場、輪休 1 場。這是唯一的數學完美解！
-                </li>
-              </ul>
+              <div className="space-y-1.5">
+                {fivePlayerValidationError.tierDetails && fivePlayerValidationError.tierDetails.length > 0 ? (
+                  fivePlayerValidationError.tierDetails.map((td) => (
+                    <div
+                      key={td.tierId}
+                      className={`p-2.5 rounded-lg border flex items-center justify-between text-xs ${
+                        td.isValid
+                          ? 'bg-emerald-50 border-emerald-200 text-emerald-950'
+                          : 'bg-rose-50 border-rose-200 text-rose-950 font-bold'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2">
+                        {td.isValid ? (
+                          <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+                        ) : (
+                          <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+                        )}
+                        <span>【{td.tierName}】目前 {td.count} 人</span>
+                      </div>
+                      <span className="text-[11px]">
+                        {td.isValid
+                          ? `✓ 已成 ${td.count / 5} 組 (每組5人)`
+                          : td.count < 5
+                          ? `不足 1 組（尚差 ${td.missingCount} 人）`
+                          : `多出 ${td.remainder} 人（尚差 ${td.missingCount} 人湊滿整組）`}
+                      </span>
+                    </div>
+                  ))
+                ) : (
+                  <p className="text-slate-500">目前名單中尚無選手，請先報名或新增選手。</p>
+                )}
+              </div>
 
-              <div className="pt-2 border-t border-slate-200 text-slate-800 bg-white p-3 rounded-lg border border-slate-200/80">
-                💡 <strong>名單調整建議：</strong>目前名單有 {fivePlayerValidationError.totalPlayers} 人，尚差{' '}
-                <span className="font-black text-rose-600 text-sm">
-                  {fivePlayerValidationError.missingCount}
-                </span>{' '}
-                位選手即可湊滿 {fivePlayerValidationError.groupCount + 1} 組（共{' '}
-                {fivePlayerValidationError.totalPlayers + fivePlayerValidationError.missingCount} 人）。
+              <div className="pt-2 border-t border-slate-200 text-slate-800 space-y-1.5 leading-relaxed">
+                <div className="font-bold text-slate-900">🏸 本次大會專屬賽制規定：</div>
+                <div className="text-[11px] text-slate-600 space-y-1 pl-1">
+                  <div>• <strong>每人打四場輪迴賽</strong>：每位選手恰出賽 4 場（輪休 1 場）。</div>
+                  <div>• <strong>隊友零重複配對</strong>：同組 5 人中，與其餘 4 人各搭檔 1 次，零重複搭檔。</div>
+                  <div>• <strong>同階級剛好五位</strong>：各階級必須為 5 的倍數，不可跨階混合組隊。</div>
+                  <div>• <strong>嚴格防撞場與體力輪休</strong>：同一位選手絕不同時出現在兩個場地，且<strong>每位選手排程至少隔一場才能再次上場</strong>！</div>
+                </div>
               </div>
             </div>
 
@@ -1629,7 +1517,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 }}
                 className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
               >
-                前往選手名單補人
+                前往選手名單微調等級/補人
               </button>
               <button
                 type="button"

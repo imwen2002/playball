@@ -166,7 +166,7 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
           <div className="space-y-2 max-w-xl">
             <div className="inline-flex items-center gap-2 px-3 py-1 bg-emerald-500/20 border border-emerald-400/30 rounded-lg text-xs font-semibold text-emerald-300">
               <Sparkles className="w-3.5 h-3.5" />
-              羽球賽事分組自評系統 · 雲端即時同步
+              羽球賽事分組自評系統
             </div>
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
               義鼎杯羽球比賽．實力程度自評表
@@ -175,17 +175,6 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
               依據<strong className="text-white">「台灣羽球推廣協會 1~18 級制度」</strong>
               設計。請直接於下方輸入姓名與 Email 即可開始填寫。填寫完成送出後，資料將直接同步儲存至主辦人後台，安排實力最均衡、最刺激好玩的雙打組合！
             </p>
-          </div>
-
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
-            <button
-              type="button"
-              onClick={onViewOfficialChart}
-              className="px-4 py-2.5 text-xs font-semibold bg-white/10 hover:bg-white/20 border border-white/20 text-white rounded-xl transition-all flex items-center justify-center gap-2 backdrop-blur-xs cursor-pointer"
-            >
-              <Award className="w-4 h-4 text-amber-400" />
-              <span>查看官方 1~18 級圖表</span>
-            </button>
           </div>
         </div>
       </div>
@@ -227,9 +216,6 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
                 01. 選手基本資料登記
               </h2>
             </div>
-            <span className="text-xs font-semibold text-emerald-600 bg-emerald-50 px-2.5 py-1 rounded-full border border-emerald-200">
-              免 Google 登入 · 直接輸入
-            </span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
@@ -278,11 +264,11 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
             </div>
 
             {/* Gender Selection */}
-            <div>
+            <div className="md:col-span-2">
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
                 性別 (男雙/女雙/混雙分組依據) <span className="text-rose-500">*</span>
               </label>
-              <div className="grid grid-cols-2 gap-2">
+              <div className="grid grid-cols-2 gap-2 max-w-md">
                 {[
                   { value: 'male', label: '男士 (Male)' },
                   { value: 'female', label: '女士 (Female)' },
@@ -298,32 +284,6 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
                     }`}
                   >
                     {g.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Dominant Hand */}
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                慣用手 (雙打走位默契參考)
-              </label>
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  { value: 'right', label: '右手持拍' },
-                  { value: 'left', label: '左手持拍 (黃金左手)' },
-                ].map((h) => (
-                  <button
-                    key={h.value}
-                    type="button"
-                    onClick={() => setDominantHand(h.value as 'right' | 'left')}
-                    className={`py-2.5 text-xs font-medium rounded-xl border text-center transition-all cursor-pointer ${
-                      dominantHand === h.value
-                        ? 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                        : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
-                    }`}
-                  >
-                    {h.label}
                   </button>
                 ))}
               </div>
@@ -347,7 +307,7 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
                   {email.trim() || '（請輸入上方聯絡信箱）'}
                   <span className="text-slate-400 mx-1.5">|</span>
                   <span className="text-slate-700 font-sans">
-                    {gender === 'male' ? '男士' : '女士'} · {dominantHand === 'right' ? '右手' : '左手'}
+                    {gender === 'male' ? '男士 (Male)' : '女士 (Female)'}
                   </span>
                 </div>
               </div>

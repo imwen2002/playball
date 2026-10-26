@@ -9,7 +9,6 @@ import { Header } from './components/Header';
 import { AssessmentForm } from './components/AssessmentForm';
 import { AdminDashboard } from './components/AdminDashboard';
 import { OfficialChartModal } from './components/OfficialChartModal';
-import { DeploymentGuideModal } from './components/DeploymentGuideModal';
 import { AdminPasswordModal } from './components/AdminPasswordModal';
 import {
   subscribeToPlayers,
@@ -18,7 +17,7 @@ import {
   batchLoadSamplePlayers,
   batchDeletePlayers,
 } from './firebase';
-import { Award, Globe, Lock, KeyRound } from 'lucide-react';
+import { Award, Lock, KeyRound } from 'lucide-react';
 
 const STORAGE_USER_KEY = 'badminton_tournament_user_v2';
 const SESSION_ADMIN_UNLOCKED_KEY = 'badminton_admin_unlocked_v1';
@@ -29,7 +28,6 @@ export default function App() {
 
   // Modals
   const [isChartOpen, setIsChartOpen] = useState(false);
-  const [isDeployGuideOpen, setIsDeployGuideOpen] = useState(false);
   const [isAdminPasswordModalOpen, setIsAdminPasswordModalOpen] = useState(false);
 
   // Admin password authentication state (persists in session)
@@ -184,7 +182,6 @@ export default function App() {
         onSelectTab={handleSelectTab}
         user={user}
         onLogout={handleLogout}
-        onOpenDeployGuide={() => setIsDeployGuideOpen(true)}
         submissionCount={players.length}
         isAdminAuthenticated={isAdminAuthenticated}
       />
@@ -244,14 +241,6 @@ export default function App() {
 
           <div className="flex items-center gap-4">
             <button
-              onClick={() => setIsDeployGuideOpen(true)}
-              className="text-slate-600 hover:text-slate-900 transition-colors flex items-center gap-1 cursor-pointer"
-            >
-              <Globe className="w-3.5 h-3.5" />
-              <span>部署到 GitHub / Google</span>
-            </button>
-            <span aria-hidden="true">·</span>
-            <button
               onClick={() => setIsChartOpen(true)}
               className="text-slate-600 hover:text-slate-900 transition-colors flex items-center gap-1 cursor-pointer"
             >
@@ -267,12 +256,6 @@ export default function App() {
         isOpen={isChartOpen}
         onClose={() => setIsChartOpen(false)}
         selectedLevel={currentUserSubmission?.level}
-      />
-
-      {/* Deployment Guide Modal */}
-      <DeploymentGuideModal
-        isOpen={isDeployGuideOpen}
-        onClose={() => setIsDeployGuideOpen(false)}
       />
 
       {/* Admin Password Gate Modal */}

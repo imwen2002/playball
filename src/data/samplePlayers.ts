@@ -1,17 +1,17 @@
 import { PlayerSubmission } from '../types';
 
 export const SAMPLE_PLAYERS: PlayerSubmission[] = [
-  // === 第 1 組：中高階組 (5人, Lv 8~11) ===
+  // === 第 1 組：中階組 (5人, Lv 8~9, 階級：中階) ===
   {
     id: 'sample-1',
     email: 'tony.hsieh@company.com',
     name: '謝東霖',
     gender: 'male',
     dominantHand: 'right',
-    level: 11,
-    tierName: '中進階',
+    level: 9,
+    tierName: '中階',
     assessmentMode: 'direct',
-    notes: '打球12年，反拍輕鬆到位，全場跑動快',
+    notes: '打球8年，反拍輕鬆到位，全場跑動快',
     submittedAt: '2026-10-18 09:00',
   },
   {
@@ -20,10 +20,10 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     name: '黃柏翰',
     gender: 'male',
     dominantHand: 'right',
-    level: 10,
-    tierName: '中進階',
+    level: 9,
+    tierName: '中階',
     assessmentMode: 'direct',
-    notes: '大學系隊隊長，熟悉雙打輪轉，可帶新手同樂',
+    notes: '大學系隊主力，熟悉雙打輪轉，平抽擋精準',
     submittedAt: '2026-10-18 09:15',
   },
   {
@@ -32,10 +32,10 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     name: '趙書豪',
     gender: 'male',
     dominantHand: 'right',
-    level: 9,
+    level: 8,
     tierName: '中階',
     assessmentMode: 'direct',
-    notes: '重砲跳殺型，體能耐打，求高手強烈對決',
+    notes: '重砲跳殺型，體能耐打，防守範圍廣',
     submittedAt: '2026-10-18 09:30',
   },
   {
@@ -63,17 +63,17 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     submittedAt: '2026-10-18 10:30',
   },
 
-  // === 第 2 組：初中階組 (5人, Lv 5~7) ===
+  // === 第 2 組：初階組 (5人, Lv 4~5, 階級：初階) ===
   {
     id: 'sample-6',
     email: 'david.wang@company.com',
     name: '王大偉',
     gender: 'male',
     dominantHand: 'left',
-    level: 7,
-    tierName: '初中階',
+    level: 5,
+    tierName: '初階',
     assessmentMode: 'quiz',
-    notes: '左手持拍，切殺吊穩定，喜歡打節奏戰',
+    notes: '定點長球能到底線，防守接殺平穩',
     submittedAt: '2026-10-18 11:15',
   },
   {
@@ -82,10 +82,10 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     name: '劉威廷',
     gender: 'male',
     dominantHand: 'right',
-    level: 6,
-    tierName: '初中階',
+    level: 5,
+    tierName: '初階',
     assessmentMode: 'direct',
-    notes: '打球3年多，固定週五下班零打，輪轉大致順暢',
+    notes: '打球2年多，固定週五零打，懂雙打走位',
     submittedAt: '2026-10-18 11:45',
   },
   {
@@ -94,10 +94,10 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     name: '郭宗翰',
     gender: 'male',
     dominantHand: 'right',
-    level: 6,
-    tierName: '初中階',
+    level: 5,
+    tierName: '初階',
     assessmentMode: 'direct',
-    notes: '打球5年，平穩防守型，以球會友',
+    notes: '切殺與長球皆能穩定入界，以球會友',
     submittedAt: '2026-10-18 13:10',
   },
   {
@@ -106,10 +106,10 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     name: '曾子健',
     gender: 'male',
     dominantHand: 'right',
-    level: 5,
+    level: 4,
     tierName: '初階',
     assessmentMode: 'quiz',
-    notes: '打球2年，基本腳步還在練，勝率穩定就好',
+    notes: '清楚正手握拍，基本腳步積極跑動',
     submittedAt: '2026-10-18 14:00',
   },
   {
@@ -118,24 +118,24 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     name: '丁詩涵',
     gender: 'female',
     dominantHand: 'right',
-    level: 5,
+    level: 4,
     tierName: '初階',
     assessmentMode: 'quiz',
-    notes: '長球能推到後場，防守接殺穩定度努力提升中',
+    notes: '長球能推到中後場，網前反應靈敏',
     submittedAt: '2026-10-18 14:30',
   },
 
-  // === 第 3 組：新手與超新手組 (5人, Lv 0~4) ===
+  // === 第 3 組：新手組 (5人, Lv 1~3, 階級：新手階) ===
   {
     id: 'sample-11',
     email: 'zoe.wu@company.com',
     name: '吳佩琪',
     gender: 'female',
     dominantHand: 'right',
-    level: 4,
-    tierName: '初階',
+    level: 3,
+    tierName: '新手階',
     assessmentMode: 'quiz',
-    notes: '網前平推反應快，但後場發力比較吃力',
+    notes: '發球高成功率，中場平抽反應快',
     submittedAt: '2026-10-18 15:00',
   },
   {
@@ -147,7 +147,7 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 3,
     tierName: '新手階',
     assessmentMode: 'quiz',
-    notes: '偶爾週末打球，希望找個強隊友互補',
+    notes: '能回擊中場中高球，希望找隊友互補同樂',
     submittedAt: '2026-10-18 15:30',
   },
   {
@@ -156,10 +156,10 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     name: '何佩芳',
     gender: 'female',
     dominantHand: 'right',
-    level: 3,
+    level: 2,
     tierName: '新手階',
     assessmentMode: 'quiz',
-    notes: '中場平抽還行，打完一起喝飲料',
+    notes: '在中場距離能來回10拍，發球穩定',
     submittedAt: '2026-10-18 16:00',
   },
   {
@@ -171,7 +171,7 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 2,
     tierName: '新手階',
     assessmentMode: 'quiz',
-    notes: '剛學羽球半年，發球可以過，希望大家多多包容歡樂打！',
+    notes: '剛學羽球半年，發球可以過網，歡樂打球！',
     submittedAt: '2026-10-18 16:30',
   },
   {
@@ -180,10 +180,10 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     name: '洪小萌',
     gender: 'female',
     dominantHand: 'right',
-    level: 0,
-    tierName: '超新手級',
+    level: 1,
+    tierName: '新手階',
     assessmentMode: 'quiz',
-    notes: '第一次拿球拍，完全沒學過也沒打過，志在揮汗同樂！',
+    notes: '熟悉比賽基本規則與發球，運動流汗同樂！',
     submittedAt: '2026-10-18 17:00',
   },
 ];

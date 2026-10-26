@@ -1,13 +1,13 @@
 import React from 'react';
 import { UserAccount } from '../types';
-import { Award, FileSpreadsheet, Sparkles, HelpCircle, Lock, Cloud } from 'lucide-react';
+import { Award, FileSpreadsheet, Sparkles, Lock } from 'lucide-react';
 
 interface HeaderProps {
   currentTab: 'assessment' | 'admin' | 'chart';
   onSelectTab: (tab: 'assessment' | 'admin' | 'chart') => void;
   user: UserAccount | null;
   onLogout: () => void;
-  onOpenDeployGuide: () => void;
+  onOpenDeployGuide?: () => void;
   submissionCount: number;
   isAdminAuthenticated?: boolean;
 }
@@ -17,7 +17,6 @@ export const Header: React.FC<HeaderProps> = ({
   onSelectTab,
   user,
   onLogout,
-  onOpenDeployGuide,
   submissionCount,
   isAdminAuthenticated = false,
 }) => {
@@ -109,13 +108,6 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Right Status / Player Profile */}
           <div className="flex items-center gap-1.5 sm:gap-2 shrink-0">
-            {/* Realtime Cloud indicator */}
-            <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1 text-xs text-emerald-700 bg-emerald-50 border border-emerald-200/80 rounded-lg">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <Cloud className="w-3.5 h-3.5 text-emerald-600" />
-              <span className="font-medium text-[11px]">雲端即時同步</span>
-            </div>
-
             {hasUser ? (
               <div className="flex items-center gap-1.5 sm:gap-2 pl-1.5 sm:pl-2 border-l border-slate-200">
                 <div className="flex items-center gap-1.5 max-w-[110px] sm:max-w-[180px]">
@@ -140,15 +132,6 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               </div>
             ) : null}
-
-            <button
-              onClick={onOpenDeployGuide}
-              title="部署說明"
-              className="hidden xl:flex items-center gap-1 px-2.5 py-1.5 text-xs text-slate-600 hover:text-slate-900 hover:bg-slate-100 rounded-lg transition-colors border border-slate-200 cursor-pointer"
-            >
-              <HelpCircle className="w-3.5 h-3.5 text-slate-500" />
-              <span>部署說明</span>
-            </button>
           </div>
         </div>
 
