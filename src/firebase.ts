@@ -250,7 +250,16 @@ export function subscribeToTournamentState(
 }
 
 /**
- * Save active tournament state to Firestore
+ * Deep sanitize any data before sending to Firestore to strip out undefined values,
+ * which cause Firestore setDoc() to fail with 'Unsupported field value: undefined'.
+ */
+function sanitizeForFirestore(data: any): any {
+  if (data === undefined || data === null) return null;
+  return JSON.parse(JSON.stringify(data));
+}
+
+/**
+ * Save active tournament state to Firestore with auto-sanitization
  */
 export async function saveTournamentState(
   courtSchedule: any | null,
@@ -258,16 +267,18 @@ export async function saveTournamentState(
 ): Promise<void> {
   const docRef = doc(db, TOURNAMENTS_COLLECTION, ACTIVE_TOURNAMENT_DOC);
   try {
-    await setDoc(
-      docRef,
-      {
-        courtSchedule: courtSchedule ?? null,
-        matchScores: matchScores ?? {},
-        updatedAt: new Date().toISOString(),
-      },
-      { merge: true }
-    );
+    const payload = sanitizeForFirestore({
+      courtSchedule: courtSchedule ?? null,
+      matchScores: matchScores ?? {},
+      updatedAt: new Date().toISOString(),
+    });
+    await setDoc(docRef, payload, { merge: true });
+    console.log('[Firestore] Tournament state successfully autosaved to cloud:', {
+      hasSchedule: Boolean(courtSchedule),
+      scoreCount: Object.keys(matchScores || {}).length,
+    });
   } catch (err) {
+    console.error('[Firestore] Failed saving tournament state to cloud:', err);
     handleFirestoreError(err, OperationType.WRITE, `${TOURNAMENTS_COLLECTION}/${ACTIVE_TOURNAMENT_DOC}`);
   }
 }

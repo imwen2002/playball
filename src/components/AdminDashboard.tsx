@@ -69,8 +69,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Navigation inside Admin: 'schedule' (3-Court) | 'scores' (Prize leaderboard) | 'roster' | 'print'
   const [activeAdminTab, setActiveAdminTab] = useState<'schedule' | 'scores' | 'roster' | 'print'>('schedule');
 
-  // Mobile layout view toggle in Roster ('cards' | 'table')
-  const [rosterViewMode, setRosterViewMode] = useState<'cards' | 'table'>('cards');
+  // Layout view toggle in Roster ('table' = 條列式清單 | 'cards' = 卡片)
+  const [rosterViewMode, setRosterViewMode] = useState<'table' | 'cards'>('table');
 
   // 3-Court Schedule state (strictly requires 5-player multiple)
   const [courtSchedule, setCourtSchedule] = useState<TournamentScheduleResult | null>(() => {
@@ -270,10 +270,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       tierName: tier.name,
       updatedAt: new Date().toISOString(),
     };
-    if (onSavePlayer) {
-      await onSavePlayer(updatedPlayer);
-    } else {
-      onUpdatePlayers(players.map((p) => (p.id === playerId ? updatedPlayer : p)));
+    setIsCloudSyncing(true);
+    try {
+      if (onSavePlayer) {
+        await onSavePlayer(updatedPlayer);
+      } else {
+        onUpdatePlayers(players.map((p) => (p.id === playerId ? updatedPlayer : p)));
+      }
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed saving player level:', err);
+    } finally {
+      setIsCloudSyncing(false);
     }
   };
 
@@ -351,17 +359,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       },
     };
     setMatchScores(updated);
+    setIsCloudSyncing(true);
     try {
       await saveTournamentState(courtSchedule, updated);
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
     } catch (err) {
       console.warn('Failed saving score to cloud:', err);
+    } finally {
+      setIsCloudSyncing(false);
     }
   };
 
   const handleToggleMatchComplete = async (matchId: string) => {
     const current = matchScores[matchId] || { scoreA: 0, scoreB: 0, completed: false };
     const nextCompleted = !current.completed;
+
+    // Check if marking as completed when both teams have 0 score (no winner indicated)
+    if (nextCompleted) {
+      const scoreA = Number(current.scoreA) === 1 ? 1 : 0;
+      const scoreB = Number(current.scoreB) === 1 ? 1 : 0;
+      if (scoreA === 0 && scoreB === 0) {
+        const confirmZero = window.confirm(
+          '⚠️ 提醒：此場比賽雙方目前皆為 0 分（尚未標記獲勝隊伍 1 分）。\n\n確定要直接標記為「完賽」嗎？\n（系統將以醒目的黃褐色警示標記此場賽事，後續隨時可點擊解鎖補填比分）'
+        );
+        if (!confirmZero) {
+          return;
+        }
+      }
+    }
+
     const updated = {
       ...matchScores,
       [matchId]: {
@@ -372,11 +398,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       },
     };
     setMatchScores(updated);
+    setIsCloudSyncing(true);
     try {
       await saveTournamentState(courtSchedule, updated);
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
     } catch (err) {
       console.warn('Failed saving completion to cloud:', err);
+    } finally {
+      setIsCloudSyncing(false);
     }
   };
 
@@ -791,11 +820,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
       {/* Central Action Toolbar: Moved from top header */}
       <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
             <Sliders className="w-4 h-4 text-emerald-600" />
             <span>賽事操作中樞：</span>
           </span>
+          {isCloudSyncing ? (
+            <span className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold animate-pulse">
+              <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
+              <span>雲端同步寫入中...</span>
+            </span>
+          ) : lastCloudSyncTime ? (
+            <span className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500" />
+              <span>☁️ 雲端已即時自動存檔 ({lastCloudSyncTime}) · 手機電腦全同步</span>
+            </span>
+          ) : (
+            <span className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-medium">
+              <span>☁️ 雲端即時連線中</span>
+            </span>
+          )}
         </div>
 
         <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
@@ -1121,12 +1165,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           const isDone = Boolean(scoreData.completed);
                           const scoreA = Number(scoreData.scoreA) === 1 ? 1 : 0;
                           const scoreB = Number(scoreData.scoreB) === 1 ? 1 : 0;
+                          const isZeroScoreDone = isDone && scoreA === 0 && scoreB === 0;
 
                           return (
                             <div
                               key={match.id}
                               className={`rounded-2xl transition-all flex flex-col justify-between p-4 space-y-3.5 ${
-                                isDone
+                                isZeroScoreDone
+                                  ? 'bg-amber-50/90 border-2 border-amber-500 shadow-md ring-2 ring-amber-500/20'
+                                  : isDone
                                   ? 'bg-emerald-50/90 border-2 border-emerald-500 shadow-md ring-2 ring-emerald-500/20'
                                   : 'bg-white border border-slate-200 hover:border-slate-300 shadow-xs'
                               }`}
@@ -1136,12 +1183,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 <div className="flex items-center gap-2">
                                   <span
                                     className={`px-2.5 py-0.5 rounded-lg text-xs font-black flex items-center gap-1 ${
-                                      isDone ? 'bg-emerald-800 text-white' : 'bg-slate-900 text-white'
+                                      isZeroScoreDone
+                                        ? 'bg-amber-900 text-white'
+                                        : isDone
+                                        ? 'bg-emerald-800 text-white'
+                                        : 'bg-slate-900 text-white'
                                     }`}
                                   >
                                     <span>場地 {match.courtNumber}</span>
                                   </span>
-                                  {isDone ? (
+                                  {isZeroScoreDone ? (
+                                    <span className="px-2 py-0.5 rounded-md text-[11px] font-black bg-amber-600 text-white flex items-center gap-1 shadow-2xs">
+                                      <AlertTriangle className="w-3.5 h-3.5" />
+                                      <span>⚠️ 完賽 (無得分待補)</span>
+                                    </span>
+                                  ) : isDone ? (
                                     <span className="px-2 py-0.5 rounded-md text-[11px] font-black bg-emerald-600 text-white flex items-center gap-1 shadow-2xs">
                                       <CheckCircle2 className="w-3.5 h-3.5" />
                                       <span>✓ 已完賽</span>
@@ -1308,12 +1364,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   type="button"
                                   onClick={() => handleToggleMatchComplete(match.id)}
                                   className={`w-full py-2 px-3 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
-                                    isDone
+                                    isZeroScoreDone
+                                      ? 'bg-amber-600 hover:bg-amber-700 text-white ring-2 ring-amber-400'
+                                      : isDone
                                       ? 'bg-emerald-600 hover:bg-emerald-700 text-white ring-2 ring-emerald-400'
                                       : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
                                   }`}
                                 >
-                                  {isDone ? (
+                                  {isZeroScoreDone ? (
+                                    <>
+                                      <Lock className="w-3.5 h-3.5 text-amber-200" />
+                                      <span>⚠️ 完賽 (雙方0分) · 比分已鎖定 (點擊解鎖修改)</span>
+                                    </>
+                                  ) : isDone ? (
                                     <>
                                       <Lock className="w-3.5 h-3.5 text-emerald-200" />
                                       <span>✓ 本場已完賽 · 比分已鎖定 (點擊解鎖修改分數)</span>
@@ -2006,29 +2069,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               </div>
 
-              {/* View toggle (Mobile card view vs Table) */}
+              {/* View toggle (Strip List view vs Cards) */}
               <div className="bg-slate-100 p-0.5 rounded-lg flex items-center text-xs">
                 <button
                   type="button"
+                  onClick={() => setRosterViewMode('table')}
+                  title="條列式清單快速修改模式"
+                  className={`px-2.5 py-1 font-bold rounded-md flex items-center gap-1 transition-all cursor-pointer ${
+                    rosterViewMode === 'table' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
+                  }`}
+                >
+                  <List className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">條列式清單</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setRosterViewMode('cards')}
-                  title="手機卡片好滑模式"
+                  title="卡片模式"
                   className={`px-2.5 py-1 font-bold rounded-md flex items-center gap-1 transition-all cursor-pointer ${
                     rosterViewMode === 'cards' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
                   }`}
                 >
                   <LayoutGrid className="w-3.5 h-3.5" />
                   <span className="hidden sm:inline">卡片</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRosterViewMode('table')}
-                  title="詳細表格模式"
-                  className={`px-2.5 py-1 font-bold rounded-md flex items-center gap-1 transition-all cursor-pointer ${
-                    rosterViewMode === 'table' ? 'bg-white text-slate-900 shadow-xs' : 'text-slate-600'
-                  }`}
-                >
-                  <List className="w-3.5 h-3.5" />
-                  <span className="hidden sm:inline">表格</span>
                 </button>
               </div>
             </div>
@@ -2131,75 +2194,76 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
 
-          {/* Mode 2: Table View */}
+          {/* Mode 2: Strip List View (條列式清單快速修改) */}
           {rosterViewMode === 'table' && (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
               <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs min-w-[650px]">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 uppercase text-[11px] font-bold">
+                <table className="w-full text-left text-xs min-w-[580px]">
+                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 text-[11px] font-bold">
                     <tr>
-                      <th className="py-3 px-4">選手姓名</th>
-                      <th className="py-3 px-4">聯絡信箱 (Email)</th>
-                      <th className="py-3 px-4">性別 / 慣用手</th>
-                      <th className="py-3 px-4 text-center">戰力級數 (0-18)</th>
-                      <th className="py-3 px-4">官方階級</th>
-                      <th className="py-3 px-4">特殊需求/叮嚀</th>
-                      <th className="py-3 px-4">人工微調等級</th>
-                      <th className="py-3 px-4 text-right">操作</th>
+                      <th className="py-3 px-3 text-center w-12">序號</th>
+                      <th className="py-3 px-4">選手姓名 / 帳號信箱</th>
+                      <th className="py-3 px-3 text-center w-16">性別</th>
+                      <th className="py-3 px-4 text-center">官方階級</th>
+                      <th className="py-3 px-4 text-center">戰力級數 (即時微調)</th>
+                      <th className="py-3 px-4 text-right w-20">操作</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredPlayers.length === 0 ? (
                       <tr>
-                        <td colSpan={8} className="py-8 text-center text-slate-400">
+                        <td colSpan={6} className="py-10 text-center text-slate-400">
                           查無符合篩選條件的羽球選手
                         </td>
                       </tr>
                     ) : (
-                      filteredPlayers.map((player) => {
+                      filteredPlayers.map((player, idx) => {
                         const tier = getTierByLevel(player.level);
                         return (
                           <tr key={player.id} className="hover:bg-slate-50/80 transition-colors">
-                            <td className="py-3 px-4 font-bold text-slate-900 whitespace-nowrap">
-                              {player.name}
+                            <td className="py-3 px-3 text-center text-slate-400 font-mono font-bold">
+                              #{idx + 1}
                             </td>
-                            <td className="py-3 px-4 font-mono text-slate-500 whitespace-nowrap">
-                              {player.email}
+                            <td className="py-3 px-4">
+                              <div className="font-extrabold text-sm text-slate-900">
+                                {player.name}
+                              </div>
+                              <div className="text-[11px] font-mono text-slate-400 truncate max-w-[220px]" title={player.email}>
+                                {player.email}
+                              </div>
                             </td>
-                            <td className="py-3 px-4 text-slate-600 whitespace-nowrap">
-                              {player.gender === 'male' ? '男' : '女'} ·{' '}
-                              {player.dominantHand === 'left' ? '左手' : '右手'}
-                            </td>
-                            <td className="py-3 px-4 text-center whitespace-nowrap">
-                              <span className="inline-block px-2.5 py-0.5 rounded-md font-mono font-black text-slate-900 bg-slate-100">
-                                Lv {player.level}
+                            <td className="py-3 px-3 text-center whitespace-nowrap">
+                              <span className={`px-2 py-0.5 rounded text-[11px] font-bold ${
+                                player.gender === 'male' ? 'bg-blue-50 text-blue-700' : 'bg-pink-50 text-pink-700'
+                              }`}>
+                                {player.gender === 'male' ? '男' : '女'}
                               </span>
                             </td>
-                            <td className="py-3 px-4 whitespace-nowrap">
-                              <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold ${tier.colorClass.badge}`}>
+                            <td className="py-3 px-4 text-center whitespace-nowrap">
+                              <span className={`inline-block px-2.5 py-0.5 rounded text-[11px] font-bold ${tier.colorClass.badge}`}>
                                 {tier.name}
                               </span>
                             </td>
-                            <td className="py-3 px-4 text-slate-500 max-w-xs truncate" title={player.notes || '無'}>
-                              {player.notes || '-'}
-                            </td>
-                            <td className="py-3 px-4 whitespace-nowrap">
-                              <div className="flex items-center gap-1">
+                            <td className="py-3 px-4 text-center whitespace-nowrap">
+                              <div className="inline-flex items-center gap-1.5 bg-slate-100/80 p-1 rounded-xl border border-slate-200">
                                 <button
                                   type="button"
-                                  title="減少1級"
+                                  title="減少 1 級"
                                   disabled={player.level <= 0}
                                   onClick={() => handleQuickLevelChange(player.id, -1)}
-                                  className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 text-slate-700 font-bold flex items-center justify-center text-xs cursor-pointer"
+                                  className="w-8 h-8 rounded-lg bg-white hover:bg-slate-200 disabled:opacity-30 text-slate-700 font-black flex items-center justify-center text-sm cursor-pointer shadow-xs border border-slate-200 transition-all active:scale-95"
                                 >
                                   -
                                 </button>
+                                <span className="font-mono font-black text-slate-900 text-sm px-2 min-w-[50px] text-center">
+                                  Lv {player.level}
+                                </span>
                                 <button
                                   type="button"
-                                  title="增加1級"
+                                  title="增加 1 級"
                                   disabled={player.level >= 18}
                                   onClick={() => handleQuickLevelChange(player.id, 1)}
-                                  className="w-6 h-6 rounded bg-slate-100 hover:bg-slate-200 disabled:opacity-30 text-slate-700 font-bold flex items-center justify-center text-xs cursor-pointer"
+                                  className="w-8 h-8 rounded-lg bg-white hover:bg-slate-200 disabled:opacity-30 text-slate-700 font-black flex items-center justify-center text-sm cursor-pointer shadow-xs border border-slate-200 transition-all active:scale-95"
                                 >
                                   +
                                 </button>
@@ -2210,7 +2274,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 type="button"
                                 onClick={() => handleDeletePlayer(player.id)}
                                 title="移除此選手"
-                                className="p-1 text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
+                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
                               >
                                 <Trash2 className="w-4 h-4" />
                               </button>
