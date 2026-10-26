@@ -39,6 +39,9 @@ import {
   ChevronDown,
   ChevronUp,
   AlertTriangle,
+  Trophy,
+  Medal,
+  Flame,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -62,8 +65,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onBatchAddPlayers,
   onBatchDeleteSamplePlayers,
 }) => {
-  // Navigation inside Admin: 'schedule' (3-Court) | 'roster' | 'print'
-  const [activeAdminTab, setActiveAdminTab] = useState<'schedule' | 'roster' | 'print'>('schedule');
+  // Navigation inside Admin: 'schedule' (3-Court) | 'scores' (Prize leaderboard) | 'roster' | 'print'
+  const [activeAdminTab, setActiveAdminTab] = useState<'schedule' | 'scores' | 'roster' | 'print'>('schedule');
 
   // Mobile layout view toggle in Roster ('cards' | 'table')
   const [rosterViewMode, setRosterViewMode] = useState<'cards' | 'table'>('cards');
@@ -318,6 +321,217 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTimeout(() => setHasCopiedText(false), 2500);
   };
 
+  // Expanded player ID in Score Leaderboard for inspecting match breakdown
+  const [expandedScorePlayerId, setExpandedScorePlayerId] = useState<string | null>(null);
+  const [scoreSortMetric, setScoreSortMetric] = useState<'points' | 'diff' | 'wins' | 'level'>('points');
+  const [scoreSearchQuery, setScoreSearchQuery] = useState('');
+
+  // Real-time calculation of individual player score statistics for tournament prize payout
+  const playerScoreStats = useMemo(() => {
+    interface PlayerScoreRecord {
+      player: PlayerSubmission;
+      tierGroupLabel: string;
+      matchesPlayed: number;
+      totalMatchesAssigned: number;
+      totalPointsWon: number;
+      totalPointsLost: number;
+      pointDifferential: number;
+      wins: number;
+      losses: number;
+      draws: number;
+      winRate: number;
+      history: {
+        matchId: string;
+        roundNumber: number;
+        courtNumber: number;
+        partnerName: string;
+        partnerLevel: number;
+        opponentsText: string;
+        myTeamScore: number;
+        oppTeamScore: number;
+        result: 'win' | 'loss' | 'draw' | 'pending';
+        completed: boolean;
+      }[];
+    }
+
+    const map = new Map<string, PlayerScoreRecord>();
+
+    players.forEach((p) => {
+      map.set(p.id, {
+        player: p,
+        tierGroupLabel: '',
+        matchesPlayed: 0,
+        totalMatchesAssigned: 4,
+        totalPointsWon: 0,
+        totalPointsLost: 0,
+        pointDifferential: 0,
+        wins: 0,
+        losses: 0,
+        draws: 0,
+        winRate: 0,
+        history: [],
+      });
+    });
+
+    if (!courtSchedule || courtSchedule.rounds.length === 0) {
+      return Array.from(map.values());
+    }
+
+    courtSchedule.rounds.forEach((round) => {
+      round.matches.forEach((m) => {
+        const score = matchScores[m.id];
+        const hasScoreA = score?.scoreA !== undefined && score?.scoreA !== null && !isNaN(Number(score?.scoreA));
+        const hasScoreB = score?.scoreB !== undefined && score?.scoreB !== null && !isNaN(Number(score?.scoreB));
+        const scoreA = hasScoreA ? Number(score.scoreA) : 0;
+        const scoreB = hasScoreB ? Number(score.scoreB) : 0;
+        const isCompleted = Boolean(score?.completed);
+        const isCounted = isCompleted || hasScoreA || hasScoreB;
+
+        const sides = [
+          { player: m.teamA[0], partner: m.teamA[1], opp: m.teamB, myScore: scoreA, oppScore: scoreB },
+          { player: m.teamA[1], partner: m.teamA[0], opp: m.teamB, myScore: scoreA, oppScore: scoreB },
+          { player: m.teamB[0], partner: m.teamB[1], opp: m.teamA, myScore: scoreB, oppScore: scoreA },
+          { player: m.teamB[1], partner: m.teamB[0], opp: m.teamA, myScore: scoreB, oppScore: scoreA },
+        ];
+
+        sides.forEach(({ player, partner, opp, myScore, oppScore }) => {
+          let rec = map.get(player.id);
+          if (!rec) {
+            rec = {
+              player,
+              tierGroupLabel: m.tierGroupLabel,
+              matchesPlayed: 0,
+              totalMatchesAssigned: 4,
+              totalPointsWon: 0,
+              totalPointsLost: 0,
+              pointDifferential: 0,
+              wins: 0,
+              losses: 0,
+              draws: 0,
+              winRate: 0,
+              history: [],
+            };
+            map.set(player.id, rec);
+          }
+
+          if (!rec.tierGroupLabel) {
+            rec.tierGroupLabel = m.tierGroupLabel;
+          }
+
+          let result: 'win' | 'loss' | 'draw' | 'pending' = 'pending';
+          if (isCounted && (myScore > 0 || oppScore > 0 || isCompleted)) {
+            rec.matchesPlayed += 1;
+            rec.totalPointsWon += myScore;
+            rec.totalPointsLost += oppScore;
+            rec.pointDifferential += (myScore - oppScore);
+
+            if (myScore > oppScore) {
+              rec.wins += 1;
+              result = 'win';
+            } else if (myScore < oppScore) {
+              rec.losses += 1;
+              result = 'loss';
+            } else {
+              rec.draws += 1;
+              result = 'draw';
+            }
+          }
+
+          rec.history.push({
+            matchId: m.id,
+            roundNumber: m.roundNumber,
+            courtNumber: m.courtNumber,
+            partnerName: partner.name,
+            partnerLevel: partner.level,
+            opponentsText: `${opp[0].name}(Lv${opp[0].level}) & ${opp[1].name}(Lv${opp[1].level})`,
+            myTeamScore: myScore,
+            oppTeamScore: oppScore,
+            result,
+            completed: isCompleted,
+          });
+        });
+      });
+    });
+
+    const list = Array.from(map.values()).map((rec) => {
+      const totalDecided = rec.wins + rec.losses;
+      const winRate = totalDecided > 0 ? Math.round((rec.wins / totalDecided) * 100) : 0;
+      return {
+        ...rec,
+        winRate,
+      };
+    });
+
+    return list.sort((a, b) => {
+      if (scoreSortMetric === 'points') {
+        if (b.totalPointsWon !== a.totalPointsWon) return b.totalPointsWon - a.totalPointsWon;
+        if (b.pointDifferential !== a.pointDifferential) return b.pointDifferential - a.pointDifferential;
+        return b.wins - a.wins;
+      }
+      if (scoreSortMetric === 'diff') {
+        if (b.pointDifferential !== a.pointDifferential) return b.pointDifferential - a.pointDifferential;
+        return b.totalPointsWon - a.totalPointsWon;
+      }
+      if (scoreSortMetric === 'wins') {
+        if (b.wins !== a.wins) return b.wins - a.wins;
+        return b.totalPointsWon - a.totalPointsWon;
+      }
+      return b.player.level - a.player.level;
+    });
+  }, [players, courtSchedule, matchScores, scoreSortMetric]);
+
+  // Export individual player score leaderboard to CSV for prize payouts
+  const exportPlayerScoresToCSV = (statsList: typeof playerScoreStats) => {
+    const headers = [
+      '獎金排名',
+      '選手姓名',
+      '戰力等級',
+      '官方階級',
+      '性別',
+      '所屬循環組別',
+      '個人總得分 (獎金依據)',
+      '個人總失分',
+      '淨勝分差',
+      '勝場',
+      '敗場',
+      '和局',
+      '勝率(%)',
+      '已賽場次',
+      'Email',
+    ];
+
+    const rows = statsList.map((s, idx) => [
+      `第 ${idx + 1} 名`,
+      s.player.name,
+      `Lv ${s.player.level}`,
+      s.player.tierName,
+      s.player.gender === 'male' ? '男' : '女',
+      s.tierGroupLabel || '-',
+      s.totalPointsWon,
+      s.totalPointsLost,
+      s.pointDifferential > 0 ? `+${s.pointDifferential}` : s.pointDifferential,
+      s.wins,
+      s.losses,
+      s.draws,
+      `${s.winRate}%`,
+      `${s.matchesPlayed}/${s.totalMatchesAssigned}`,
+      s.player.email,
+    ]);
+
+    const csvContent =
+      '\uFEFF' +
+      [headers.join(','), ...rows.map((r) => r.map((c) => `"${String(c).replace(/"/g, '""')}"`).join(','))].join('\n');
+
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', `羽球錦標賽_個人得分獎金結算名冊_${new Date().toISOString().split('T')[0]}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6">
       {/* Top Banner & Control Deck */}
@@ -337,69 +551,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </h1>
           </div>
 
-          {/* Quick Action Buttons */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          {/* Top Right Action: Lock Admin */}
+          {onLockAdmin && (
             <button
               type="button"
-              onClick={handleGenerateCourtSchedule}
-              className="px-3 sm:px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+              onClick={onLockAdmin}
+              title="重新鎖定後台"
+              className="px-3 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shrink-0 self-start md:self-auto"
             >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>一鍵排定 3 場地賽程</span>
+              <Lock className="w-3.5 h-3.5" />
+              <span>鎖定後台</span>
             </button>
-
-            <button
-              type="button"
-              onClick={handlePreloadSampleData}
-              className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
-            >
-              <Users className="w-3.5 h-3.5 text-slate-500" />
-              <span>載入 15 位示範名單 (3組5人)</span>
-            </button>
-
-            {samplePlayersInRoster.length > 0 && (
-              <button
-                type="button"
-                onClick={handleDeleteSampleData}
-                title="一鍵清除所有預設的測試示範選手名單"
-                className="px-3 py-2 text-xs font-semibold rounded-xl border border-rose-300 text-rose-700 bg-rose-50 hover:bg-rose-100 transition-all flex items-center gap-1 cursor-pointer shadow-xs"
-              >
-                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-                <span>一鍵刪除示範名單 ({samplePlayersInRoster.length})</span>
-              </button>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setIsAddPlayerOpen(true)}
-              className="px-3 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              <span>手動新增</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => exportPlayersToCSV(players)}
-              disabled={players.length === 0}
-              className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors flex items-center gap-1 disabled:opacity-50 cursor-pointer"
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">匯出 CSV</span>
-            </button>
-
-            {onLockAdmin && (
-              <button
-                type="button"
-                onClick={onLockAdmin}
-                title="重新鎖定後台"
-                className="px-2.5 py-2 text-xs font-semibold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
-              >
-                <Lock className="w-3.5 h-3.5" />
-                <span className="hidden sm:inline">鎖定</span>
-              </button>
-            )}
-          </div>
+          )}
         </div>
 
         {/* 5-Player Tournament Rule Live Status Bar */}
@@ -535,6 +698,67 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
+      {/* Central Action Toolbar: Moved from top header */}
+      <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
+        <div className="flex items-center gap-2">
+          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+            <Sliders className="w-4 h-4 text-emerald-600" />
+            <span>賽事操作中樞：</span>
+          </span>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+          <button
+            type="button"
+            onClick={handleGenerateCourtSchedule}
+            className="px-3.5 sm:px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>一鍵排定 3 場地賽程</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={handlePreloadSampleData}
+            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+          >
+            <Users className="w-3.5 h-3.5 text-slate-500" />
+            <span>載入 15 位示範名單 (3組5人)</span>
+          </button>
+
+          {samplePlayersInRoster.length > 0 && (
+            <button
+              type="button"
+              onClick={handleDeleteSampleData}
+              title="一鍵清除所有預設的測試示範選手名單"
+              className="px-3 py-2 text-xs font-semibold rounded-xl border border-rose-300 text-rose-700 bg-rose-50 hover:bg-rose-100 transition-all flex items-center gap-1 cursor-pointer shadow-xs"
+            >
+              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+              <span>一鍵刪除示範名單 ({samplePlayersInRoster.length})</span>
+            </button>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setIsAddPlayerOpen(true)}
+            className="px-3 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>手動新增選手</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => exportPlayersToCSV(players)}
+            disabled={players.length === 0}
+            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors flex items-center gap-1 disabled:opacity-50 cursor-pointer"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span className="hidden sm:inline">匯出選手名單 CSV</span>
+          </button>
+        </div>
+      </div>
+
       {/* Admin Functional Navigation Tabs */}
       <div className="flex items-center gap-1 sm:gap-2 border-b border-slate-200 overflow-x-auto no-scrollbar pb-1">
         <button
@@ -552,6 +776,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               {courtSchedule.rounds.length}輪
             </span>
           )}
+        </button>
+
+        <button
+          onClick={() => setActiveAdminTab('scores')}
+          className={`py-2 px-3 sm:px-4 text-xs sm:text-sm font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+            activeAdminTab === 'scores'
+              ? 'bg-amber-600 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+          }`}
+        >
+          <Trophy className="w-4 h-4" />
+          <span>每位選手統計得分區</span>
+          <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+            activeAdminTab === 'scores' ? 'bg-white text-amber-800' : 'bg-amber-100 text-amber-800'
+          }`}>
+            個人獎金榜
+          </span>
         </button>
 
         <button
@@ -983,6 +1224,356 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
+      {/* Tab: Individual Player Score Leaderboard (每位選手統計得分區 · 獎金結算總榜) */}
+      {activeAdminTab === 'scores' && (
+        <div className="space-y-4 sm:space-y-6">
+          {/* Header Card */}
+          <div className="bg-gradient-to-br from-amber-500/10 via-white to-amber-500/5 rounded-2xl p-4 sm:p-6 border border-amber-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2.5 py-0.5 rounded-md bg-amber-600 text-white text-[11px] font-black flex items-center gap-1">
+                  <Trophy className="w-3.5 h-3.5" />
+                  <span>賽事獎金計算排行榜</span>
+                </span>
+                <span className="text-xs font-bold text-amber-900 bg-amber-100 px-2 py-0.5 rounded-md">
+                  雙打輪迴制 · 個人累積得分結算
+                </span>
+              </div>
+              <h3 className="text-lg font-black text-slate-900">
+                每位選手出賽統計得分與獎金名次
+              </h3>
+              <p className="text-xs text-slate-600 max-w-2xl">
+                本次錦標賽每人打滿 4 場。各場次雙打得分即時全額計入選手之「個人總得分」與「淨勝分差」。此榜單即時更新，供主辦單位作為頒發個人獎金與排名獎項之權威依據。
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => exportPlayerScoresToCSV(playerScoreStats)}
+                disabled={playerScoreStats.length === 0}
+                className="px-4 py-2.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              >
+                <Download className="w-4 h-4 text-amber-400" />
+                <span>匯出獎金得分成績單 (CSV)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[11px] text-slate-500 font-bold block">參賽選手總數</span>
+              <div className="text-xl font-black text-slate-900 mt-0.5">{players.length} 人</div>
+              <span className="text-[10px] text-slate-400 block mt-0.5">每人預計 4 場</span>
+            </div>
+
+            <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[11px] text-slate-500 font-bold block">最高個人總得分</span>
+              <div className="text-xl font-black text-amber-600 mt-0.5">
+                {playerScoreStats[0] ? `${playerScoreStats[0].totalPointsWon} 分` : '0 分'}
+              </div>
+              <span className="text-[10px] text-slate-500 block mt-0.5 truncate">
+                {playerScoreStats[0] ? `暫居第 1 名：${playerScoreStats[0].player.name}` : '-'}
+              </span>
+            </div>
+
+            <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[11px] text-slate-500 font-bold block">最高個人淨勝分</span>
+              <div className="text-xl font-black text-emerald-600 mt-0.5">
+                {playerScoreStats.reduce((max, s) => Math.max(max, s.pointDifferential), 0) > 0
+                  ? `+${playerScoreStats.reduce((max, s) => Math.max(max, s.pointDifferential), 0)}`
+                  : `${playerScoreStats.reduce((max, s) => Math.max(max, s.pointDifferential), 0)}`}
+              </div>
+              <span className="text-[10px] text-slate-400 block mt-0.5">總得分 － 總失分</span>
+            </div>
+
+            <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[11px] text-slate-500 font-bold block">賽程完賽率</span>
+              <div className="text-xl font-black text-slate-900 mt-0.5">
+                {courtSchedule && courtSchedule.totalMatchesScheduled > 0
+                  ? `${Math.round(
+                      (Object.values(matchScores).filter((s) => s.completed).length /
+                        courtSchedule.totalMatchesScheduled) *
+                        100
+                    )}%`
+                  : '0%'}
+              </div>
+              <span className="text-[10px] text-slate-400 block mt-0.5">
+                {courtSchedule
+                  ? `${Object.values(matchScores).filter((s) => s.completed).length} / ${courtSchedule.totalMatchesScheduled} 場已完賽`
+                  : '尚未排程'}
+              </span>
+            </div>
+          </div>
+
+          {/* Filter, Search & Sorting Controls */}
+          <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200 shadow-xs flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+            <div className="relative w-full sm:w-72">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+              <input
+                type="text"
+                value={scoreSearchQuery}
+                onChange={(e) => setScoreSearchQuery(e.target.value)}
+                placeholder="搜尋選手姓名或 Email..."
+                className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-amber-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-xs font-bold text-slate-500">排序方式：</span>
+              {[
+                { id: 'points', label: '個人總得分 (獎金依據)' },
+                { id: 'diff', label: '淨勝分差' },
+                { id: 'wins', label: '勝場數' },
+                { id: 'level', label: '戰力級數' },
+              ].map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  onClick={() => setScoreSortMetric(s.id as any)}
+                  className={`px-2.5 py-1 text-xs font-bold rounded-lg border transition-all cursor-pointer ${
+                    scoreSortMetric === s.id
+                      ? 'bg-amber-500 text-white border-amber-500 shadow-2xs'
+                      : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                  }`}
+                >
+                  {s.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Scores Table / Cards Display */}
+          <div className="space-y-3">
+            {playerScoreStats
+              .filter((s) => {
+                if (!scoreSearchQuery.trim()) return true;
+                const q = scoreSearchQuery.toLowerCase();
+                return (
+                  s.player.name.toLowerCase().includes(q) ||
+                  s.player.email.toLowerCase().includes(q)
+                );
+              })
+              .map((stat, index) => {
+                const rank = index + 1;
+                const isExpanded = expandedScorePlayerId === stat.player.id;
+                const tier = getTierByLevel(stat.player.level);
+
+                return (
+                  <div
+                    key={stat.player.id}
+                    className={`bg-white rounded-2xl border transition-all shadow-xs overflow-hidden ${
+                      rank === 1
+                        ? 'border-amber-300 ring-2 ring-amber-300/40 bg-gradient-to-r from-amber-50/30 via-white to-white'
+                        : rank === 2
+                        ? 'border-slate-300'
+                        : rank === 3
+                        ? 'border-amber-200'
+                        : 'border-slate-200'
+                    }`}
+                  >
+                    <div className="p-4 sm:p-5 flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                      {/* Left: Rank & Player identity */}
+                      <div className="flex items-center gap-3 sm:gap-4">
+                        <div
+                          className={`w-10 h-10 sm:w-12 sm:h-12 rounded-2xl font-black flex items-center justify-center shrink-0 shadow-xs text-sm sm:text-base ${
+                            rank === 1
+                              ? 'bg-gradient-to-br from-amber-400 to-yellow-500 text-white ring-2 ring-amber-300'
+                              : rank === 2
+                              ? 'bg-gradient-to-br from-slate-300 to-slate-400 text-white'
+                              : rank === 3
+                              ? 'bg-gradient-to-br from-amber-600 to-amber-700 text-white'
+                              : 'bg-slate-100 text-slate-700'
+                          }`}
+                        >
+                          {rank === 1 ? '🥇1' : rank === 2 ? '🥈2' : rank === 3 ? '🥉3' : `#${rank}`}
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-black text-base text-slate-900">
+                              {stat.player.name}
+                            </span>
+                            <span className="px-2 py-0.5 rounded-md font-mono text-xs font-black bg-slate-100 text-slate-800">
+                              Lv {stat.player.level}
+                            </span>
+                            <span
+                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${tier.colorClass.badge}`}
+                            >
+                              {tier.name}
+                            </span>
+                            {stat.tierGroupLabel && (
+                              <span className="text-[11px] font-medium text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
+                                {stat.tierGroupLabel}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
+                            <span>{stat.player.gender === 'male' ? '男士' : '女士'}</span>
+                            <span>·</span>
+                            <span>{stat.player.dominantHand === 'left' ? '左手' : '右手'}</span>
+                            <span>·</span>
+                            <span className="font-mono text-slate-400">{stat.player.email}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Right: Score Metrics Strip */}
+                      <div className="flex items-center gap-3 sm:gap-6 flex-wrap justify-between lg:justify-end border-t lg:border-t-0 pt-3 lg:pt-0 border-slate-100">
+                        {/* Total Points Won (Highlighted for Prize) */}
+                        <div className="text-center px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-xl min-w-[90px]">
+                          <span className="text-[10px] font-bold text-amber-800 uppercase block">
+                            個人總得分
+                          </span>
+                          <span className="text-xl sm:text-2xl font-black text-amber-600 tabular-nums">
+                            {stat.totalPointsWon}
+                          </span>
+                          <span className="text-[9px] text-amber-700 font-semibold block">獎金依據</span>
+                        </div>
+
+                        {/* Total Points Lost */}
+                        <div className="text-center px-2 py-1 min-w-[60px]">
+                          <span className="text-[10px] font-bold text-slate-400 block">總失分</span>
+                          <span className="text-base sm:text-lg font-bold text-slate-700 tabular-nums">
+                            {stat.totalPointsLost}
+                          </span>
+                        </div>
+
+                        {/* Net Point Differential */}
+                        <div className="text-center px-2.5 py-1 min-w-[70px]">
+                          <span className="text-[10px] font-bold text-slate-400 block">淨勝分差</span>
+                          <span
+                            className={`text-base sm:text-lg font-extrabold tabular-nums ${
+                              stat.pointDifferential > 0
+                                ? 'text-emerald-600'
+                                : stat.pointDifferential < 0
+                                ? 'text-rose-600'
+                                : 'text-slate-500'
+                            }`}
+                          >
+                            {stat.pointDifferential > 0
+                              ? `+${stat.pointDifferential}`
+                              : stat.pointDifferential}
+                          </span>
+                        </div>
+
+                        {/* Win / Loss Record */}
+                        <div className="text-center px-2 py-1 min-w-[70px]">
+                          <span className="text-[10px] font-bold text-slate-400 block">戰績 (勝/敗)</span>
+                          <span className="text-sm sm:text-base font-bold text-slate-800">
+                            {stat.wins}勝 {stat.losses}敗
+                          </span>
+                          <span className="text-[10px] text-slate-400 block">
+                            勝率 {stat.winRate}%
+                          </span>
+                        </div>
+
+                        {/* Matches Played */}
+                        <div className="text-center px-2 py-1 min-w-[65px]">
+                          <span className="text-[10px] font-bold text-slate-400 block">已賽場數</span>
+                          <span className="text-sm font-bold text-slate-800">
+                            {stat.matchesPlayed} / {stat.totalMatchesAssigned}
+                          </span>
+                        </div>
+
+                        {/* Toggle Match History Breakdown */}
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedScorePlayerId(isExpanded ? null : stat.player.id)
+                          }
+                          className="px-3 py-1.5 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+                        >
+                          <span>{isExpanded ? '收起明細' : '出賽得分明細'}</span>
+                          {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Expandable Match-by-Match History Breakdown */}
+                    {isExpanded && (
+                      <div className="bg-slate-50 border-t border-slate-200 p-4 sm:p-5 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <h5 className="font-bold text-xs text-slate-800 flex items-center gap-1.5">
+                            <Swords className="w-3.5 h-3.5 text-amber-600" />
+                            <span>{stat.player.name} 的 4 場出賽得分明細紀錄：</span>
+                          </h5>
+                          <span className="text-[11px] text-slate-500">
+                            已記錄 {stat.history.length} 場（每場得分皆全額計入個人總分）
+                          </span>
+                        </div>
+
+                        {stat.history.length === 0 ? (
+                          <p className="text-xs text-slate-400 py-3 text-center">
+                            尚未產生賽程或尚未輸入比分
+                          </p>
+                        ) : (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                            {stat.history.map((h, hIdx) => (
+                              <div
+                                key={h.matchId}
+                                className={`p-3 rounded-xl border text-xs flex items-center justify-between gap-3 ${
+                                  h.result === 'win'
+                                    ? 'bg-emerald-50/70 border-emerald-200'
+                                    : h.result === 'loss'
+                                    ? 'bg-rose-50/70 border-rose-200'
+                                    : 'bg-white border-slate-200'
+                                }`}
+                              >
+                                <div className="space-y-1">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-black text-slate-900">
+                                      第 {hIdx + 1} 場 · 第 {h.roundNumber} 輪 (場地 {h.courtNumber})
+                                    </span>
+                                    <span
+                                      className={`px-1.5 py-0.2 text-[10px] font-bold rounded ${
+                                        h.result === 'win'
+                                          ? 'bg-emerald-600 text-white'
+                                          : h.result === 'loss'
+                                          ? 'bg-rose-600 text-white'
+                                          : 'bg-slate-200 text-slate-700'
+                                      }`}
+                                    >
+                                      {h.result === 'win'
+                                        ? '勝出'
+                                        : h.result === 'loss'
+                                        ? '落敗'
+                                        : h.result === 'draw'
+                                        ? '和局'
+                                        : '待賽'}
+                                    </span>
+                                  </div>
+                                  <div className="text-slate-700">
+                                    🤝 隊友搭檔：<span className="font-bold text-slate-900">{h.partnerName}</span>{' '}
+                                    <span className="text-[10px] font-mono text-slate-500">(Lv{h.partnerLevel})</span>
+                                  </div>
+                                  <div className="text-slate-500 text-[11px]">
+                                    ⚔️ 對手：{h.opponentsText}
+                                  </div>
+                                </div>
+
+                                <div className="text-right shrink-0">
+                                  <div className="text-sm font-black text-slate-900 tabular-nums">
+                                    {h.myTeamScore} : {h.oppTeamScore}
+                                  </div>
+                                  <div className="text-[10px] font-bold text-amber-700 mt-0.5">
+                                    得 +{h.myTeamScore} 分
+                                  </div>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+          </div>
+        </div>
+      )}
+
       {/* Tab 2: Full Player Roster & Quick Level Adjust */}
       {activeAdminTab === 'roster' && (
         <div className="space-y-4">
@@ -1335,6 +1926,52 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <p className="text-center text-slate-400 py-8 text-xs">
                 尚未排定賽程，請先至「3 場地循環排程表」點選「一鍵排定 3 場地賽程」。
               </p>
+            )}
+
+            {/* Printable Individual Score Leaderboard Table */}
+            {courtSchedule && courtSchedule.rounds.length > 0 && playerScoreStats.some((s) => s.totalPointsWon > 0 || s.matchesPlayed > 0) && (
+              <div className="pt-4 border-t-2 border-slate-900 space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-black text-base text-slate-900">
+                    🏆 選手個人累積得分獎金公告榜
+                  </h3>
+                  <span className="text-xs text-slate-500">
+                    計分標準：雙打比賽 · 個人累積總得分發放獎金
+                  </span>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs border border-slate-300">
+                    <thead className="bg-slate-100 border-b border-slate-300 font-bold">
+                      <tr>
+                        <th className="py-2 px-3">排名</th>
+                        <th className="py-2 px-3">選手姓名</th>
+                        <th className="py-2 px-3">戰力級數</th>
+                        <th className="py-2 px-3">所屬循環組</th>
+                        <th className="py-2 px-3 text-right">個人總得分 (獎金)</th>
+                        <th className="py-2 px-3 text-right">總失分</th>
+                        <th className="py-2 px-3 text-right">淨勝分差</th>
+                        <th className="py-2 px-3 text-center">戰績</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-200">
+                      {playerScoreStats.map((s, idx) => (
+                        <tr key={s.player.id}>
+                          <td className="py-1.5 px-3 font-bold">{idx + 1}</td>
+                          <td className="py-1.5 px-3 font-extrabold">{s.player.name}</td>
+                          <td className="py-1.5 px-3">Lv {s.player.level}</td>
+                          <td className="py-1.5 px-3 text-slate-600">{s.tierGroupLabel || '-'}</td>
+                          <td className="py-1.5 px-3 text-right font-black text-amber-700">{s.totalPointsWon}</td>
+                          <td className="py-1.5 px-3 text-right text-slate-600">{s.totalPointsLost}</td>
+                          <td className="py-1.5 px-3 text-right font-bold">
+                            {s.pointDifferential > 0 ? `+${s.pointDifferential}` : s.pointDifferential}
+                          </td>
+                          <td className="py-1.5 px-3 text-center">{s.wins}勝{s.losses}敗</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
             )}
 
             <div className="pt-4 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
