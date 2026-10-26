@@ -31,7 +31,7 @@
         },
         "level": {
           "type": "number",
-          "description": "Calculated or chosen badminton tier level 1-18"
+          "description": "Calculated or chosen badminton tier level 0-18"
         },
         "tierName": {
           "type": "string",

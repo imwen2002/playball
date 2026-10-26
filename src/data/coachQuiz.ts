@@ -8,6 +8,11 @@ export const COACH_QUIZ_QUESTIONS: QuizQuestion[] = [
     iconName: 'calendar',
     options: [
       {
+        label: '完全沒打過 / 第一次拿羽球拍',
+        description: '純粹想流汗體驗運動樂趣，完全無球齡經驗',
+        scoreLevel: 0,
+      },
+      {
         label: '剛接觸 / 1年以內，偶爾運動才打',
         description: '還在熟悉規則與場地，打球頻率每月1次或更少',
         scoreLevel: 1.5,
@@ -46,6 +51,11 @@ export const COACH_QUIZ_QUESTIONS: QuizQuestion[] = [
     iconName: 'target',
     options: [
       {
+        label: '完全不會發球 / 經常揮空或過不了網',
+        description: '不知道發球規則或拋球打不到，需要手把手教學',
+        scoreLevel: 0,
+      },
+      {
         label: '發球容易掛網或出界，中場來回偶爾揮空',
         description: '發球成功率約一半左右，需要多一點專注',
         scoreLevel: 1.5,
@@ -78,6 +88,11 @@ export const COACH_QUIZ_QUESTIONS: QuizQuestion[] = [
     coachNote: '教練解析：長球考驗發力協調性（側身引拍、內旋甩腕）。是區分新手與初中階的關鍵！',
     iconName: 'arrow-up-right',
     options: [
+      {
+        label: '完全沒概念 / 手臂沒力打不遠',
+        description: '羽球只在自己身前落下，還不知道如何用身體協調發力',
+        scoreLevel: 0,
+      },
       {
         label: '多半只能打到「中場」，打不到對手後場',
         description: '常靠手臂硬揮，容易手痠且球飛不遠',
@@ -112,6 +127,11 @@ export const COACH_QUIZ_QUESTIONS: QuizQuestion[] = [
     iconName: 'zap',
     options: [
       {
+        label: '完全沒學過握拍 / 只會像蒼蠅拍般推碰球',
+        description: '不知道正反手握拍區別，只希望球能碰過網就好',
+        scoreLevel: 0,
+      },
+      {
         label: '用同一種像拿蒼蠅拍的方式握拍，正反拍切換不順',
         description: '還不太會殺球或切球，主要是用推擋碰回對面',
         scoreLevel: 2,
@@ -144,6 +164,11 @@ export const COACH_QUIZ_QUESTIONS: QuizQuestion[] = [
     coachNote: '教練解析：羽球「七分步伐三分手法」，步法順暢才能跑到位迎球，防守才能頂住攻擊。',
     iconName: 'footprints',
     options: [
+      {
+        label: '場上完全不會跑動 / 不知道要站哪裡',
+        description: '看到球飛過來容易呆住或慢半拍，步伐還未建立',
+        scoreLevel: 0,
+      },
       {
         label: '球過來才看著跑，常常煞不住或跌跌撞撞',
         description: '對手殺球過來大多反應不及，容易驚慌失措',
@@ -178,6 +203,11 @@ export const COACH_QUIZ_QUESTIONS: QuizQuestion[] = [
     iconName: 'users',
     options: [
       {
+        label: '完全沒打過雙打 / 毫無走位觀念',
+        description: '不知道雙打規則與防守站位，只負責打自己面前的球',
+        scoreLevel: 0,
+      },
+      {
         label: '不太懂雙打站位，常跟隊友卡在同一邊或差點撞拍',
         description: '球在中間時常猶豫「這球是你打還是我打？」',
         scoreLevel: 2,
@@ -208,10 +238,10 @@ export const COACH_QUIZ_QUESTIONS: QuizQuestion[] = [
 
 export function calculateQuizLevel(answers: Record<string, number>): number {
   const values = Object.values(answers);
-  if (values.length === 0) return 2;
+  if (values.length === 0) return 0;
   const sum = values.reduce((acc, curr) => acc + curr, 0);
   const avg = sum / values.length;
-  // Round to nearest 1-18 integer
-  const finalLevel = Math.max(1, Math.min(18, Math.round(avg)));
+  // Support 0 to 18 integer levels
+  const finalLevel = Math.max(0, Math.min(18, Math.round(avg)));
   return finalLevel;
 }

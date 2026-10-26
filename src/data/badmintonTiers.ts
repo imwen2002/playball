@@ -2,6 +2,21 @@ import { TierInfo } from '../types';
 
 export const BADMINTON_TIERS: TierInfo[] = [
   {
+    tierId: 'tier-0',
+    name: '超新手階',
+    levels: [0],
+    experience: '完全無羽球經驗，第一次拿拍或志在體驗流汗',
+    colorClass: {
+      bg: 'bg-teal-50 hover:bg-teal-100/80',
+      border: 'border-teal-300',
+      text: 'text-teal-950',
+      badge: 'bg-teal-600 text-white',
+    },
+    levelDescriptions: {
+      0: '完全沒打過羽球或第一次拿球拍，尚不熟悉比賽規則與發球，以趣味體驗、流汗運動為主！',
+    },
+  },
+  {
     tierId: 'tier-1',
     name: '新手階',
     levels: [1, 2, 3],

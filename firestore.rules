@@ -15,7 +15,7 @@ service cloud.firestore {
         data.email is string && data.email.size() > 0 && data.email.size() <= 150 &&
         (data.gender == 'male' || data.gender == 'female') &&
         (data.dominantHand == 'right' || data.dominantHand == 'left') &&
-        data.level is number && data.level >= 1 && data.level <= 18 &&
+        data.level is number && data.level >= 0 && data.level <= 18 &&
         data.tierName is string && data.tierName.size() <= 50 &&
         (data.assessmentMode == 'quiz' || data.assessmentMode == 'direct') &&
         data.submittedAt is string && data.submittedAt.size() <= 50 &&

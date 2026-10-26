@@ -31,7 +31,7 @@ export const OfficialChartModal: React.FC<OfficialChartModalProps> = ({
               <span className="text-xs text-slate-500 font-normal">21.04.19 更新官方標準</span>
             </h2>
             <p className="text-xs text-slate-600 mt-0.5">
-              本賽事評估基準：1~18級完整標準與詳細各球路技術說明
+              本賽事評估基準：0~18級完整標準與詳細各球路技術說明
             </p>
           </div>
 

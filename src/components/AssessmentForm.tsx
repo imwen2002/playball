@@ -390,7 +390,7 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                老手直選：1~18級
+                老手直選：0~18級
               </button>
             </div>
           </div>
@@ -398,24 +398,24 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
           {/* Mode A: 6-Question Quiz */}
           {assessmentMode === 'quiz' && (
             <div className="space-y-6">
-              <div className="bg-emerald-50/60 border border-emerald-100 rounded-xl p-3.5 text-xs text-emerald-900 flex items-start gap-2">
+              <div className="bg-emerald-50/60 border border-emerald-100 rounded-xl p-3 sm:p-3.5 text-xs text-emerald-900 flex items-start gap-2">
                 <Sparkles className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
                 <span>
                   <strong>新手不知自己幾級？沒關係！</strong>
-                  請依您的直覺與平日打球習慣點選最符合的描述，系統將透過專業羽球教練權重自動換算您的台灣羽協分級。
+                  請依您的直覺與平日打球習慣點選最符合的描述（完全沒打過可直接選第 1 項），系統將自動換算您的台灣羽協分級。
                 </span>
               </div>
 
-              <div className="space-y-6">
+              <div className="space-y-5 sm:space-y-6">
                 {COACH_QUIZ_QUESTIONS.map((q, qIndex) => {
                   const currentSelected = quizAnswers[q.id];
                   return (
                     <div
                       key={q.id}
-                      className="p-5 rounded-2xl bg-slate-50 border border-slate-200/80 hover:border-slate-300 transition-all space-y-3"
+                      className="p-4 sm:p-5 rounded-2xl bg-slate-50 border border-slate-200/80 hover:border-slate-300 transition-all space-y-2.5 sm:space-y-3"
                     >
                       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1">
-                        <span className="text-xs font-bold text-emerald-700 tracking-wide uppercase">
+                        <span className="text-[11px] sm:text-xs font-bold text-emerald-700 tracking-wide uppercase">
                           第 {qIndex + 1} 題 · {q.coachNote}
                         </span>
                       </div>
@@ -423,7 +423,7 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
                         {q.title}
                       </h3>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
                         {q.options.map((opt, optIndex) => {
                           const isSelected = currentSelected === opt.scoreLevel;
                           return (
@@ -437,8 +437,8 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
                                   : 'bg-white border-slate-200 hover:border-slate-300 text-slate-700 hover:bg-slate-50/60'
                               }`}
                             >
-                              <div className="flex items-center justify-between">
-                                <span className="text-xs font-bold">
+                              <div className="flex items-center justify-between gap-1">
+                                <span className="text-xs font-bold leading-tight">
                                   {opt.label}
                                 </span>
                                 {isSelected && (
@@ -459,15 +459,15 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
             </div>
           )}
 
-          {/* Mode B: Direct Level Selection 1-18 */}
+          {/* Mode B: Direct Level Selection 0-18 */}
           {assessmentMode === 'direct' && (
             <div className="space-y-4">
               <div className="text-xs text-slate-600">
-                如果您常打臨打或羽球賽事，熟知自己的台灣羽協分級，可直接從下方 1 到 18 級中選擇：
+                如果您常打臨打或羽球賽事，熟知自己的分級，可直接從下方 0 到 18 級中點選：
               </div>
 
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-                {Array.from({ length: 18 }, (_, i) => i + 1).map((lvl) => {
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-1.5 sm:gap-2">
+                {Array.from({ length: 19 }, (_, i) => i).map((lvl) => {
                   const isSelected = directLevel === lvl;
                   const tier = getTierByLevel(lvl);
                   return (
@@ -475,19 +475,19 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
                       key={lvl}
                       type="button"
                       onClick={() => setDirectLevel(lvl)}
-                      className={`p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center ${
+                      className={`p-2 sm:p-2.5 rounded-xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center ${
                         isSelected
                           ? 'bg-emerald-600 text-white border-emerald-700 shadow-md ring-2 ring-emerald-400/40'
                           : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'
                       }`}
                     >
-                      <span className="text-base font-extrabold">Lv {lvl}</span>
+                      <span className="text-sm sm:text-base font-extrabold">Lv {lvl}</span>
                       <span
-                        className={`text-[10px] mt-0.5 truncate max-w-full px-1 rounded ${
+                        className={`text-[9px] sm:text-[10px] mt-0.5 truncate max-w-full px-1 rounded ${
                           isSelected ? 'text-emerald-100' : 'text-slate-500'
                         }`}
                       >
-                        {tier.name}
+                        {lvl === 0 ? '超新手' : tier.name}
                       </span>
                     </button>
                   );
@@ -514,7 +514,7 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
           )}
 
           {/* Real-time Coach Diagnosis Card */}
-          <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-5 sm:p-6 text-white shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div className="bg-gradient-to-r from-slate-900 to-slate-800 rounded-2xl p-4 sm:p-6 text-white shadow-md flex flex-col md:flex-row items-start md:items-center justify-between gap-4 sm:gap-6">
             <div className="space-y-1.5">
               <div className="flex items-center gap-2">
                 <span className="text-xs uppercase tracking-wider text-emerald-400 font-bold">
@@ -543,12 +543,15 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
                 賽事分組預估：
               </p>
               <p className="text-slate-200">
-                {activeLevel <= 3 && '安排在「歡樂推廣組」，對抗同級新手，體驗羽球來回樂趣！'}
+                {activeLevel === 0 && '安排在「超新手體驗組」，人人平等體驗羽球樂趣，完全不擔心跟不上！'}
+                {activeLevel >= 1 &&
+                  activeLevel <= 3 &&
+                  '安排在「歡樂推廣組」，對抗同級新手，體驗羽球來回樂趣！'}
                 {activeLevel >= 4 &&
                   activeLevel <= 6 &&
                   '安排在「實力挑戰組」，適合一般零打中下程度，攻守有來有回！'}
                 {activeLevel >= 7 &&
-                  '安排在「菁英旗艦組」或「強帶弱互補雙打」，發揮戰力核心角色！'}
+                  '安排在「菁英旗艦組」或「同級循環雙打」，發揮戰力核心角色！'}
               </p>
             </div>
           </div>
