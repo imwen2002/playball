@@ -15,7 +15,11 @@ import {
   generateBalancedMixedDoubles,
   exportPlayersToCSV,
 } from '../utils/groupingAlgorithms';
-import { generateFourMatchCourtSchedule } from '../utils/courtScheduler';
+import {
+  generateFourMatchCourtSchedule,
+  validateFivePlayerRule,
+  FivePlayerValidationResult,
+} from '../utils/courtScheduler';
 import {
   Users,
   Search,
@@ -41,6 +45,7 @@ import {
   Swords,
   ChevronDown,
   ChevronUp,
+  AlertTriangle,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -70,13 +75,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Mobile layout view toggle in Roster ('cards' | 'table')
   const [rosterViewMode, setRosterViewMode] = useState<'cards' | 'table'>('cards');
 
-  // 3-Court Schedule state
+  // 3-Court Schedule state (strictly requires 5-player multiple)
   const [courtSchedule, setCourtSchedule] = useState<TournamentScheduleResult | null>(() => {
-    if (players.length >= 4) {
+    const val = validateFivePlayerRule(players);
+    if (val.isValid) {
       return generateFourMatchCourtSchedule(players);
     }
     return null;
   });
+
+  // 5-player round robin validation error modal
+  const [isFivePlayerModalOpen, setIsFivePlayerModalOpen] = useState(false);
+  const [fivePlayerValidationError, setFivePlayerValidationError] = useState<FivePlayerValidationResult | null>(null);
+
+  // 5-player rule helper
+  const fivePlayerStatus = useMemo(() => {
+    return validateFivePlayerRule(players);
+  }, [players]);
 
   // Selected court filter in schedule: 0 = all, 1, 2, 3
   const [selectedCourtFilter, setSelectedCourtFilter] = useState<number>(0);
@@ -156,10 +171,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       });
   }, [players, searchQuery, tierFilter, genderFilter, sortField, sortOrder]);
 
-  // Execute 3-court schedule generation
+  // Execute 3-court schedule generation (Strict 5-player rule: 4 matches, zero duplicate partners)
   const handleGenerateCourtSchedule = () => {
-    if (players.length < 4) {
-      alert('選手人數不足（至少需 4 人），請先讓選手填寫自評表或手動新增選手！');
+    const validation = validateFivePlayerRule(players);
+    if (!validation.isValid) {
+      setFivePlayerValidationError(validation);
+      setIsFivePlayerModalOpen(true);
       return;
     }
     const result = generateFourMatchCourtSchedule(players);
@@ -167,17 +184,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setActiveAdminTab('schedule');
   };
 
-  // Preload demo players
+  // Preload demo players (15 players = 3 groups of 5)
   const handlePreloadSampleData = async () => {
     if (players.length > 0) {
-      if (!confirm('載入示範名單將會寫入 16 位測試球員資料至雲端資料庫。確定要載入嗎？')) {
+      if (!confirm('載入示範名單將會寫入 15 位測試球員資料（剛好 3 組，每組 5 人循環制）至雲端資料庫。確定要載入嗎？')) {
         return;
       }
     }
     const existingEmails = new Set(players.map((p) => p.email.toLowerCase()));
     const toAdd = SAMPLE_PLAYERS.filter((p) => !existingEmails.has(p.email.toLowerCase()));
     if (toAdd.length === 0) {
-      alert('示範名單已全數在列表中！');
+      alert('15 位示範名單已全數在列表中！');
       return;
     }
     if (onBatchAddPlayers) {
@@ -188,13 +205,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  // Quick delete the 16 demo players
+  // Quick delete the demo players
   const handleDeleteSampleData = async () => {
     const count = samplePlayersInRoster.length;
     const msg =
       count > 0
         ? `確定要一鍵刪除名單內的 ${count} 位預設示範選手嗎？\n此動作將同步從雲端資料庫中移除。`
-        : `確定要一鍵清除所有預設的 16 位示範名單嗎？\n此動作將確保雲端資料庫中的示範選手資料被徹底移除。`;
+        : `確定要一鍵清除所有預設的 15 位示範名單嗎？\n此動作將確保雲端資料庫中的示範選手資料被徹底移除。`;
 
     if (!confirm(msg)) {
       return;
@@ -348,7 +365,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 賽事主辦人後台
               </span>
               <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-medium">
-                3 場地循環 · 每人打 4 場不重複對戰
+                3 場地循環 · 每組 5 人 · 每人 4 場 0 重複搭檔
               </span>
             </div>
             <h1 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight">
@@ -373,14 +390,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
             >
               <Users className="w-3.5 h-3.5 text-slate-500" />
-              <span>載入示範名單</span>
+              <span>載入 15 位示範名單 (3組5人)</span>
             </button>
 
             {samplePlayersInRoster.length > 0 && (
               <button
                 type="button"
                 onClick={handleDeleteSampleData}
-                title="一鍵清除所有預設的 16 位測試示範選手名單"
+                title="一鍵清除所有預設的測試示範選手名單"
                 className="px-3 py-2 text-xs font-semibold rounded-xl border border-rose-300 text-rose-700 bg-rose-50 hover:bg-rose-100 transition-all flex items-center gap-1 cursor-pointer shadow-xs"
               >
                 <Trash2 className="w-3.5 h-3.5 text-rose-600" />
@@ -419,6 +436,65 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </button>
             )}
           </div>
+        </div>
+
+        {/* 5-Player Tournament Rule Live Status Bar */}
+        <div
+          className={`p-3 sm:p-3.5 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs transition-all ${
+            fivePlayerStatus.isValid
+              ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+              : 'bg-amber-50/90 border-amber-300 text-amber-950'
+          }`}
+        >
+          <div className="flex items-start sm:items-center gap-2">
+            {fivePlayerStatus.isValid ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5 sm:mt-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5 sm:mt-0" />
+            )}
+            <div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="font-extrabold text-sm">
+                  {fivePlayerStatus.isValid
+                    ? `人數符合 5 人循環制：共 ${players.length} 人（已組成 ${fivePlayerStatus.groupCount} 組，每組 5 位）`
+                    : `人數未符合 5 人循環制：目前 ${players.length} 人（同組規定必須剛好 5 位）`}
+                </span>
+                <span
+                  className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                    fivePlayerStatus.isValid
+                      ? 'bg-emerald-200/70 text-emerald-800'
+                      : 'bg-amber-200/80 text-amber-900'
+                  }`}
+                >
+                  {fivePlayerStatus.isValid ? '✓ 可排定賽程' : `尚差 ${fivePlayerStatus.missingCount} 人成組`}
+                </span>
+              </div>
+              <p className="text-[11px] opacity-85 mt-0.5">
+                {fivePlayerStatus.isValid
+                  ? '數學保證：每組 5 人進行 5 場賽事，每位選手恰出賽 4 場（輪休 1 場），與其餘 4 人各搭檔 1 次（零重複搭檔）。'
+                  : `賽事要求每人出賽 4 場且隊友不重複，依數學定理同組必須為 5 人。請調整名單至 5 的倍數（如 5、10、15、20 人）。`}
+              </p>
+            </div>
+          </div>
+
+          {!fivePlayerStatus.isValid && (
+            <div className="flex items-center gap-1.5 shrink-0 self-start sm:self-auto pt-1 sm:pt-0">
+              <button
+                type="button"
+                onClick={() => setIsAddPlayerOpen(true)}
+                className="px-2.5 py-1 text-xs font-bold bg-amber-700 text-white rounded-lg hover:bg-amber-800 transition-colors cursor-pointer"
+              >
+                手動補選手
+              </button>
+              <button
+                type="button"
+                onClick={handlePreloadSampleData}
+                className="px-2.5 py-1 text-xs font-bold bg-white border border-amber-300 text-amber-900 rounded-lg hover:bg-amber-100 transition-colors cursor-pointer"
+              >
+                載入 15 人示範名單
+              </button>
+            </div>
+          )}
         </div>
 
         {/* Real-time Tournament Analytics KPI strip */}
@@ -561,14 +637,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="space-y-1">
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-                <span>3 個場地 · 同等級循環賽程</span>
-                <span className="text-xs font-normal text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md">
-                  每人打滿 4 場 · 嚴格防撞場
+                <span>3 個場地 · 同等級 5 人循環賽程</span>
+                <span className="text-xs font-normal text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md font-semibold">
+                  每組 5 人 · 每人 4 場 · 隊友 0 重複搭檔
                 </span>
               </h3>
               <p className="text-xs text-slate-500">
-                演算法已根據選手等級同級組隊，並精準控制對戰與搭檔不重複。
+                依據 5 人雙打完全輪迴定理（C(5,2)=10 種配對），每人固定出賽 4 場（輪休 1 場），與同組其他 4 人各搭檔 1 次，實現 0 重複配對。
               </p>
+              {courtSchedule && courtSchedule.tierDivisions && courtSchedule.tierDivisions.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[11px] font-bold text-slate-600">循環組別：</span>
+                  {courtSchedule.tierDivisions.map((div, i) => (
+                    <span
+                      key={i}
+                      className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-800 text-[11px] font-medium"
+                    >
+                      {div.tierLabel}（{div.players.map((p) => p.name).join('、')}）
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
@@ -838,9 +927,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </span>
                         </div>
 
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-1.5 sm:gap-2">
                           <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
                             已排 {stat.totalMatches} / 4 場
+                          </span>
+                          <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-50 border border-teal-200 text-teal-800">
+                            4搭檔 0重複
                           </span>
                           {isExpanded ? (
                             <ChevronUp className="w-4 h-4 text-slate-400" />
@@ -883,26 +975,57 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
 
-          {/* Empty state if not generated */}
+          {/* Empty state if not generated or invalid count */}
           {(!courtSchedule || courtSchedule.rounds.length === 0) && (
-            <div className="bg-white rounded-2xl p-8 sm:p-12 text-center border border-dashed border-slate-300 space-y-3">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 mx-auto flex items-center justify-center">
-                <CalendarDays className="w-6 h-6" />
+            <div className="bg-white rounded-2xl p-6 sm:p-10 text-center border border-dashed border-slate-300 space-y-4">
+              <div className={`w-14 h-14 rounded-2xl mx-auto flex items-center justify-center ${
+                fivePlayerStatus.isValid ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
+              }`}>
+                {fivePlayerStatus.isValid ? <CalendarDays className="w-7 h-7" /> : <AlertTriangle className="w-7 h-7" />}
               </div>
-              <h4 className="text-base font-bold text-slate-800">
-                尚未排定 3 場地循環賽程
-              </h4>
-              <p className="text-xs text-slate-500 max-w-md mx-auto">
-                目前名單共有 {players.length} 位選手。點擊下方按鈕，系統將自動依同等級選手進行每人 4 場輪迴排程！
-              </p>
-              <button
-                type="button"
-                onClick={handleGenerateCourtSchedule}
-                className="px-5 py-2.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
-              >
-                <Sparkles className="w-3.5 h-3.5" />
-                <span>立即一鍵排定 3 場地賽程</span>
-              </button>
+
+              <div className="space-y-1.5 max-w-lg mx-auto">
+                <h4 className="text-base font-extrabold text-slate-900">
+                  {fivePlayerStatus.isValid
+                    ? `人數合格，可一鍵排定 ${fivePlayerStatus.groupCount} 組 3 場地賽程`
+                    : `同組配對人員一定要五位（目前 ${players.length} 人，尚差 ${fivePlayerStatus.missingCount} 人）`}
+                </h4>
+                <p className="text-xs text-slate-500 leading-relaxed">
+                  {fivePlayerStatus.isValid
+                    ? `目前名單共有 ${players.length} 位選手（每組剛好 5 位）。點擊下方按鈕，系統將自動分組並排定「每人 4 場輪迴賽、隊友 0 重複配對」之 3 場地賽程！`
+                    : `賽事要求每人固定出賽 4 場且隊友不重複。依數學定理，同組配對人數必須剛好為 5 位（每組打 5 場，每人輪休 1 場）。請補齊至 5 的倍數後即可排程。`}
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                {fivePlayerStatus.isValid ? (
+                  <button
+                    type="button"
+                    onClick={handleGenerateCourtSchedule}
+                    className="px-5 py-2.5 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
+                  >
+                    <Sparkles className="w-4 h-4" />
+                    <span>立即一鍵排定 3 場地賽程</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setActiveAdminTab('roster')}
+                      className="px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+                    >
+                      前往選手名單補人
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handlePreloadSampleData}
+                      className="px-4 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-colors cursor-pointer"
+                    >
+                      載入 15 位示範名單 (3組5人)
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1439,6 +1562,83 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* 5-Player Rule Validation Error Modal */}
+      {isFivePlayerModalOpen && fivePlayerValidationError && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-rose-200 overflow-hidden p-6 space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-rose-100 text-rose-600 flex items-center justify-center shrink-0 shadow-xs">
+                <AlertTriangle className="w-6 h-6" />
+              </div>
+              <div className="space-y-1">
+                <h3 className="font-black text-base text-slate-900">
+                  賽程排定失敗：同組配對人員一定要五位
+                </h3>
+                <p className="text-xs text-rose-600 font-bold">
+                  目前選手總人數：{fivePlayerValidationError.totalPlayers} 位（無法分為每組 5 位）
+                </p>
+              </div>
+            </div>
+
+            <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 text-xs text-slate-700 space-y-3">
+              <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                <span>📌 賽制規則與數學配對限制：</span>
+              </div>
+              <ul className="space-y-1.5 list-disc list-inside text-slate-600 pl-1 leading-relaxed">
+                <li>
+                  <strong className="text-slate-800">每人打四場輪迴賽</strong>：每場 4 人上場雙打（2 對 2）。
+                </li>
+                <li>
+                  <strong className="text-slate-800">隊友完全不重複搭檔</strong>：每人出賽 4 場，必須剛好有 4 位不同搭檔。
+                </li>
+                <li>
+                  <strong className="text-slate-800">同組人員一定要剛好五位</strong>：5 位選手恰有 C(5, 2) = 10 種雙打搭檔組合。5 場賽事（每場 2 對組合）剛好消耗所有 10 種搭檔，且每人恰出賽 4 場、輪休 1 場。這是唯一的數學完美解！
+                </li>
+              </ul>
+
+              <div className="pt-2 border-t border-slate-200 text-slate-800 bg-white p-3 rounded-lg border border-slate-200/80">
+                💡 <strong>名單調整建議：</strong>目前名單有 {fivePlayerValidationError.totalPlayers} 人，尚差{' '}
+                <span className="font-black text-rose-600 text-sm">
+                  {fivePlayerValidationError.missingCount}
+                </span>{' '}
+                位選手即可湊滿 {fivePlayerValidationError.groupCount + 1} 組（共{' '}
+                {fivePlayerValidationError.totalPlayers + fivePlayerValidationError.missingCount} 人）。
+              </div>
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFivePlayerModalOpen(false);
+                  handlePreloadSampleData();
+                }}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-colors cursor-pointer"
+              >
+                載入 15 位示範名單 (3組5人)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setIsFivePlayerModalOpen(false);
+                  setActiveAdminTab('roster');
+                }}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                前往選手名單補人
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsFivePlayerModalOpen(false)}
+                className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
+              >
+                關閉
+              </button>
+            </div>
           </div>
         </div>
       )}
