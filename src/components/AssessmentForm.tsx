@@ -11,7 +11,6 @@ import {
   Send,
   Award,
   Shield,
-  MessageSquare,
   HelpCircle,
   CloudCheck,
 } from 'lucide-react';
@@ -514,30 +513,6 @@ export const AssessmentForm: React.FC<AssessmentFormProps> = ({
                   '安排在「菁英旗艦組」或「同級循環雙打」，發揮戰力核心角色！'}
               </p>
             </div>
-          </div>
-        </div>
-
-        {/* Section 3: 特殊需求或給主辦人的叮嚀 (選填) */}
-        <div className="bg-white rounded-2xl p-6 sm:p-7 border border-slate-200 shadow-xs space-y-5">
-          <div className="flex items-center gap-2 border-b border-slate-100 pb-3">
-            <div className="w-2.5 h-2.5 rounded-full bg-emerald-500" />
-            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
-              <MessageSquare className="w-4 h-4 text-emerald-600" />
-              <span>03. 特殊需求或給主辦人的叮嚀 (選填)</span>
-            </h2>
-          </div>
-
-          <div>
-            <textarea
-              rows={3}
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="例如：後場長球與殺球為主，希望搭檔擅長網前小球或防守；或者膝蓋有舊傷移動稍慢..."
-              className="w-full p-3.5 text-xs sm:text-sm bg-white text-slate-900 placeholder:text-slate-400 border border-slate-300 rounded-xl focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-colors"
-            />
-            <p className="text-[11px] text-slate-500 mt-1.5">
-              若無特殊需求可留空，主辦人後台將依照每位選手的戰力級數進行最佳化公平雙打分組。
-            </p>
           </div>
         </div>
 

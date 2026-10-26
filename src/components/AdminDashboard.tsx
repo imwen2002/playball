@@ -278,25 +278,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setNewPlayerLevel(0);
   };
 
-  // Update match score in schedule
+  // Update match score in schedule (Strictly 0 or 1 for winning count, default 0)
   const handleUpdateMatchScore = (matchId: string, team: 'A' | 'B', score: number) => {
-    setMatchScores((prev) => ({
-      ...prev,
-      [matchId]: {
-        ...prev[matchId],
-        [team === 'A' ? 'scoreA' : 'scoreB']: score,
-      },
-    }));
+    const clampedScore = score === 1 ? 1 : 0;
+    setMatchScores((prev) => {
+      const current = prev[matchId] || { scoreA: 0, scoreB: 0, completed: false };
+      return {
+        ...prev,
+        [matchId]: {
+          scoreA: current.scoreA ?? 0,
+          scoreB: current.scoreB ?? 0,
+          completed: current.completed ?? false,
+          ...current,
+          [team === 'A' ? 'scoreA' : 'scoreB']: clampedScore,
+        },
+      };
+    });
   };
 
   const handleToggleMatchComplete = (matchId: string) => {
-    setMatchScores((prev) => ({
-      ...prev,
-      [matchId]: {
-        ...prev[matchId],
-        completed: !prev[matchId]?.completed,
-      },
-    }));
+    setMatchScores((prev) => {
+      const current = prev[matchId] || { scoreA: 0, scoreB: 0, completed: false };
+      return {
+        ...prev,
+        [matchId]: {
+          scoreA: current.scoreA ?? 0,
+          scoreB: current.scoreB ?? 0,
+          ...current,
+          completed: !current.completed,
+        },
+      };
+    });
   };
 
   // Copy schedule text to clipboard
@@ -973,22 +985,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       {matchesToShow.map((match) => {
                         const scoreData = matchScores[match.id] || {};
                         const isDone = Boolean(scoreData.completed);
+                        const scoreA = Number(scoreData.scoreA) === 1 ? 1 : 0;
+                        const scoreB = Number(scoreData.scoreB) === 1 ? 1 : 0;
 
                         return (
                           <div
                             key={match.id}
-                            className={`rounded-2xl border p-4 space-y-3 transition-all flex flex-col justify-between ${
+                            className={`rounded-2xl transition-all flex flex-col justify-between p-4 space-y-3.5 ${
                               isDone
-                                ? 'bg-slate-50/80 border-slate-200'
-                                : 'bg-white border-slate-200 hover:border-slate-300 shadow-xs'
+                                ? 'bg-emerald-50/90 border-2 border-emerald-500 shadow-md ring-2 ring-emerald-500/20'
+                                : 'bg-white border border-slate-200 hover:border-slate-300 shadow-xs'
                             }`}
                           >
-                            {/* Court Number Tag & Tier label */}
+                            {/* Court Number Tag, Tier label & Live Status */}
                             <div className="flex items-center justify-between">
-                              <span className="px-2.5 py-0.5 rounded-lg text-xs font-black bg-slate-900 text-white flex items-center gap-1">
-                                <span>場地 {match.courtNumber}</span>
-                              </span>
-                              <span className="text-[11px] text-slate-500 font-medium truncate max-w-[150px]">
+                              <div className="flex items-center gap-2">
+                                <span
+                                  className={`px-2.5 py-0.5 rounded-lg text-xs font-black flex items-center gap-1 ${
+                                    isDone ? 'bg-emerald-800 text-white' : 'bg-slate-900 text-white'
+                                  }`}
+                                >
+                                  <span>場地 {match.courtNumber}</span>
+                                </span>
+                                {isDone ? (
+                                  <span className="px-2 py-0.5 rounded-md text-[11px] font-black bg-emerald-600 text-white flex items-center gap-1 shadow-2xs">
+                                    <CheckCircle2 className="w-3.5 h-3.5" />
+                                    <span>✓ 已完賽</span>
+                                  </span>
+                                ) : (
+                                  <span className="px-2 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-500 border border-slate-200">
+                                    進行中 / 待比
+                                  </span>
+                                )}
+                              </div>
+                              <span className="text-[11px] text-slate-500 font-medium truncate max-w-[140px]">
                                 {match.tierGroupLabel}
                               </span>
                             </div>
@@ -996,11 +1026,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             {/* Versus Battle Block */}
                             <div className="space-y-2">
                               {/* Team A */}
-                              <div className="p-2.5 bg-emerald-50/70 border border-emerald-200/80 rounded-xl flex items-center justify-between">
-                                <div className="space-y-0.5 truncate">
-                                  <span className="text-[10px] font-bold text-emerald-800 uppercase block">
-                                    隊伍 A
-                                  </span>
+                              <div
+                                className={`p-2.5 rounded-xl flex items-center justify-between transition-all ${
+                                  isDone
+                                    ? scoreA === 1
+                                      ? 'bg-emerald-100 border-2 border-emerald-500 shadow-2xs'
+                                      : 'bg-white/80 border border-slate-200 opacity-70'
+                                    : 'bg-emerald-50/70 border border-emerald-200/80'
+                                }`}
+                              >
+                                <div className="space-y-0.5 truncate pr-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] font-black text-emerald-800 uppercase block">
+                                      隊伍 A
+                                    </span>
+                                    {isDone && scoreA === 1 && (
+                                      <span className="px-1.5 py-0.2 bg-emerald-600 text-white text-[9px] font-black rounded">
+                                        🏆 勝出
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="text-xs font-extrabold text-slate-900 truncate">
                                     {match.teamA[0].name}{' '}
                                     <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
@@ -1012,15 +1057,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </span>
                                   </div>
                                 </div>
-                                <input
-                                  type="number"
-                                  placeholder="得分"
-                                  value={scoreData.scoreA ?? ''}
-                                  onChange={(e) =>
-                                    handleUpdateMatchScore(match.id, 'A', Number(e.target.value))
-                                  }
-                                  className="w-14 text-center py-1 text-xs font-bold bg-white border border-emerald-300 rounded-lg shrink-0 ml-2"
-                                />
+
+                                {/* Score 0 / 1 Selector */}
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateMatchScore(match.id, 'A', 0)}
+                                    title="0 分 (未得勝場)"
+                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                                      scoreA === 0
+                                        ? 'bg-slate-700 text-white shadow-xs'
+                                        : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    0
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateMatchScore(match.id, 'A', 1)}
+                                    title="1 分 (獲勝 1 場)"
+                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                                      scoreA === 1
+                                        ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400'
+                                        : 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                                    }`}
+                                  >
+                                    1
+                                  </button>
+                                </div>
                               </div>
 
                               <div className="text-center">
@@ -1030,11 +1094,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               </div>
 
                               {/* Team B */}
-                              <div className="p-2.5 bg-blue-50/70 border border-blue-200/80 rounded-xl flex items-center justify-between">
-                                <div className="space-y-0.5 truncate">
-                                  <span className="text-[10px] font-bold text-blue-800 uppercase block">
-                                    隊伍 B
-                                  </span>
+                              <div
+                                className={`p-2.5 rounded-xl flex items-center justify-between transition-all ${
+                                  isDone
+                                    ? scoreB === 1
+                                      ? 'bg-blue-100 border-2 border-blue-500 shadow-2xs'
+                                      : 'bg-white/80 border border-slate-200 opacity-70'
+                                    : 'bg-blue-50/70 border border-blue-200/80'
+                                }`}
+                              >
+                                <div className="space-y-0.5 truncate pr-2">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="text-[10px] font-black text-blue-800 uppercase block">
+                                      隊伍 B
+                                    </span>
+                                    {isDone && scoreB === 1 && (
+                                      <span className="px-1.5 py-0.2 bg-blue-600 text-white text-[9px] font-black rounded">
+                                        🏆 勝出
+                                      </span>
+                                    )}
+                                  </div>
                                   <div className="text-xs font-extrabold text-slate-900 truncate">
                                     {match.teamB[0].name}{' '}
                                     <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
@@ -1046,32 +1125,59 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </span>
                                   </div>
                                 </div>
-                                <input
-                                  type="number"
-                                  placeholder="得分"
-                                  value={scoreData.scoreB ?? ''}
-                                  onChange={(e) =>
-                                    handleUpdateMatchScore(match.id, 'B', Number(e.target.value))
-                                  }
-                                  className="w-14 text-center py-1 text-xs font-bold bg-white border border-blue-300 rounded-lg shrink-0 ml-2"
-                                />
+
+                                {/* Score 0 / 1 Selector */}
+                                <div className="flex items-center gap-1 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateMatchScore(match.id, 'B', 0)}
+                                    title="0 分 (未得勝場)"
+                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                                      scoreB === 0
+                                        ? 'bg-slate-700 text-white shadow-xs'
+                                        : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
+                                    }`}
+                                  >
+                                    0
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateMatchScore(match.id, 'B', 1)}
+                                    title="1 分 (獲勝 1 場)"
+                                    className={`w-7 h-7 text-xs font-black rounded-lg transition-all cursor-pointer flex items-center justify-center ${
+                                      scoreB === 1
+                                        ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-400'
+                                        : 'bg-white border border-blue-300 text-blue-700 hover:bg-blue-50'
+                                    }`}
+                                  >
+                                    1
+                                  </button>
+                                </div>
                               </div>
                             </div>
 
-                            {/* Status Checkbox */}
-                            <div className="pt-1 flex items-center justify-between text-xs border-t border-slate-100">
-                              <label className="flex items-center gap-1.5 cursor-pointer text-[11px] text-slate-600 select-none">
-                                <input
-                                  type="checkbox"
-                                  checked={isDone}
-                                  onChange={() => handleToggleMatchComplete(match.id)}
-                                  className="rounded text-emerald-600 focus:ring-emerald-500"
-                                />
-                                <span>{isDone ? '✓ 本場已完賽' : '標記完賽'}</span>
-                              </label>
-                              <span className="text-[10px] text-slate-400 font-mono">
-                                {match.id}
-                              </span>
+                            {/* Prominent Match Completion Toggle Button */}
+                            <div className="pt-2 border-t border-slate-200/80">
+                              <button
+                                type="button"
+                                onClick={() => handleToggleMatchComplete(match.id)}
+                                className={`w-full py-2 px-3 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
+                                  isDone
+                                    ? 'bg-emerald-600 hover:bg-emerald-700 text-white ring-2 ring-emerald-400'
+                                    : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                                }`}
+                              >
+                                {isDone ? (
+                                  <>
+                                    <CheckCircle2 className="w-4 h-4" />
+                                    <span>✓ 本場已完賽 (點擊可重新標記)</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <span>標記此場完賽</span>
+                                  </>
+                                )}
+                              </button>
                             </div>
                           </div>
                         );
@@ -1412,8 +1518,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
                             <span>{stat.player.gender === 'male' ? '男士' : '女士'}</span>
                             <span>·</span>
-                            <span>{stat.player.dominantHand === 'left' ? '左手' : '右手'}</span>
-                            <span>·</span>
                             <span className="font-mono text-slate-400">{stat.player.email}</span>
                           </div>
                         </div>
@@ -1424,12 +1528,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         {/* Total Points Won (Highlighted for Prize) */}
                         <div className="text-center px-3 py-1.5 bg-amber-50 border border-amber-200 rounded-xl min-w-[90px]">
                           <span className="text-[10px] font-bold text-amber-800 uppercase block">
-                            個人總得分
+                            個人總勝場積分
                           </span>
                           <span className="text-xl sm:text-2xl font-black text-amber-600 tabular-nums">
                             {stat.totalPointsWon}
                           </span>
-                          <span className="text-[9px] text-amber-700 font-semibold block">獎金依據</span>
+                          <span className="text-[9px] text-amber-700 font-semibold block">獎金依據 (1勝=1分)</span>
                         </div>
 
                         {/* Total Points Lost */}
@@ -1702,16 +1806,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         </p>
                         <div className="text-[11px] text-slate-600 flex items-center gap-2">
                           <span>{player.gender === 'male' ? '男士' : '女士'}</span>
-                          <span>·</span>
-                          <span>{player.dominantHand === 'left' ? '左手' : '右手'}</span>
-                          {player.notes && (
-                            <>
-                              <span>·</span>
-                              <span className="truncate max-w-[120px] text-slate-400" title={player.notes}>
-                                {player.notes}
-                              </span>
-                            </>
-                          )}
                         </div>
                       </div>
 

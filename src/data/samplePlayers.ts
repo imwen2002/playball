@@ -11,7 +11,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 9,
     tierName: '中階',
     assessmentMode: 'direct',
-    notes: '打球8年，反拍輕鬆到位，全場跑動快',
     submittedAt: '2026-10-18 09:00',
   },
   {
@@ -23,7 +22,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 9,
     tierName: '中階',
     assessmentMode: 'direct',
-    notes: '大學系隊主力，熟悉雙打輪轉，平抽擋精準',
     submittedAt: '2026-10-18 09:15',
   },
   {
@@ -35,7 +33,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 8,
     tierName: '中階',
     assessmentMode: 'direct',
-    notes: '重砲跳殺型，體能耐打，防守範圍廣',
     submittedAt: '2026-10-18 09:30',
   },
   {
@@ -43,11 +40,10 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     email: 'alex.yang@company.com',
     name: '楊承翰',
     gender: 'male',
-    dominantHand: 'left',
+    dominantHand: 'right',
     level: 8,
     tierName: '中階',
     assessmentMode: 'direct',
-    notes: '左手前場快速抓球封網，失誤極少',
     submittedAt: '2026-10-18 10:00',
   },
   {
@@ -59,7 +55,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 8,
     tierName: '中階',
     assessmentMode: 'quiz',
-    notes: '平推防守穩健，後場具備連續下壓能力',
     submittedAt: '2026-10-18 10:30',
   },
 
@@ -69,11 +64,10 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     email: 'david.wang@company.com',
     name: '王大偉',
     gender: 'male',
-    dominantHand: 'left',
+    dominantHand: 'right',
     level: 5,
     tierName: '初階',
     assessmentMode: 'quiz',
-    notes: '定點長球能到底線，防守接殺平穩',
     submittedAt: '2026-10-18 11:15',
   },
   {
@@ -85,7 +79,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 5,
     tierName: '初階',
     assessmentMode: 'direct',
-    notes: '打球2年多，固定週五零打，懂雙打走位',
     submittedAt: '2026-10-18 11:45',
   },
   {
@@ -97,7 +90,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 5,
     tierName: '初階',
     assessmentMode: 'direct',
-    notes: '切殺與長球皆能穩定入界，以球會友',
     submittedAt: '2026-10-18 13:10',
   },
   {
@@ -109,7 +101,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 4,
     tierName: '初階',
     assessmentMode: 'quiz',
-    notes: '清楚正手握拍，基本腳步積極跑動',
     submittedAt: '2026-10-18 14:00',
   },
   {
@@ -121,7 +112,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 4,
     tierName: '初階',
     assessmentMode: 'quiz',
-    notes: '長球能推到中後場，網前反應靈敏',
     submittedAt: '2026-10-18 14:30',
   },
 
@@ -135,7 +125,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 3,
     tierName: '新手階',
     assessmentMode: 'quiz',
-    notes: '發球高成功率，中場平抽反應快',
     submittedAt: '2026-10-18 15:00',
   },
   {
@@ -147,7 +136,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 3,
     tierName: '新手階',
     assessmentMode: 'quiz',
-    notes: '能回擊中場中高球，希望找隊友互補同樂',
     submittedAt: '2026-10-18 15:30',
   },
   {
@@ -159,7 +147,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 2,
     tierName: '新手階',
     assessmentMode: 'quiz',
-    notes: '在中場距離能來回10拍，發球穩定',
     submittedAt: '2026-10-18 16:00',
   },
   {
@@ -171,7 +158,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 2,
     tierName: '新手階',
     assessmentMode: 'quiz',
-    notes: '剛學羽球半年，發球可以過網，歡樂打球！',
     submittedAt: '2026-10-18 16:30',
   },
   {
@@ -183,7 +169,6 @@ export const SAMPLE_PLAYERS: PlayerSubmission[] = [
     level: 1,
     tierName: '新手階',
     assessmentMode: 'quiz',
-    notes: '熟悉比賽基本規則與發球，運動流汗同樂！',
     submittedAt: '2026-10-18 17:00',
   },
 ];
