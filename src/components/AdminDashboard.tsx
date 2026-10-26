@@ -411,17 +411,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Copy schedule text to clipboard
   const handleCopySchedule = () => {
-    if (!courtSchedule || courtSchedule.rounds.length === 0) return;
+    if (!courtSchedule || !Array.isArray(courtSchedule.rounds) || courtSchedule.rounds.length === 0) return;
     let text = `🏸 【義鼎杯羽球賽 · 3 場地循環賽程表】\n賽制：同級循環每人打滿 4 場 · 嚴格防撞場\n`;
     text += `總選手數：${players.length} 人 · 總輪次：${courtSchedule.rounds.length} 輪\n\n`;
 
     courtSchedule.rounds.forEach((round) => {
+      if (!round) return;
       text += `━━━━━━━━━━━━━━━\n📍 第 ${round.roundNumber} 輪\n━━━━━━━━━━━━━━━\n`;
-      round.matches.forEach((m) => {
-        text += `  場地 ${m.courtNumber} [${m.tierGroupLabel}]: ${m.teamA[0].name} & ${m.teamA[1].name} vs ${m.teamB[0].name} & ${m.teamB[1].name}\n`;
+      (round.matches || []).forEach((m) => {
+        if (!m) return;
+        const tA0 = m.teamA?.[0]?.name || '未定';
+        const tA1 = m.teamA?.[1]?.name || '未定';
+        const tB0 = m.teamB?.[0]?.name || '未定';
+        const tB1 = m.teamB?.[1]?.name || '未定';
+        text += `  場地 ${m.courtNumber} [${m.tierGroupLabel || ''}]: ${tA0} & ${tA1} vs ${tB0} & ${tB1}\n`;
       });
-      if (round.restingPlayers.length > 0) {
-        text += `  💤 本輪輪休：${round.restingPlayers.map((p) => p.name).join('、')}\n`;
+      if (round.restingPlayers && round.restingPlayers.length > 0) {
+        text += `  💤 本輪輪休：${round.restingPlayers.map((p) => p?.name || '').filter(Boolean).join('、')}\n`;
       }
       text += '\n';
     });
@@ -466,7 +472,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
     const map = new Map<string, PlayerScoreRecord>();
 
-    players.forEach((p) => {
+    (players || []).forEach((p) => {
+      if (!p || !p.id) return;
       map.set(p.id, {
         player: p,
         tierGroupLabel: '',
@@ -483,33 +490,44 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       });
     });
 
-    if (!courtSchedule || courtSchedule.rounds.length === 0) {
+    if (!courtSchedule || !Array.isArray(courtSchedule.rounds) || courtSchedule.rounds.length === 0) {
       return Array.from(map.values());
     }
 
     courtSchedule.rounds.forEach((round) => {
+      if (!round || !Array.isArray(round.matches)) return;
       round.matches.forEach((m) => {
-        const score = matchScores[m.id];
-        const hasScoreA = score?.scoreA !== undefined && score?.scoreA !== null && !isNaN(Number(score?.scoreA));
-        const hasScoreB = score?.scoreB !== undefined && score?.scoreB !== null && !isNaN(Number(score?.scoreB));
+        if (!m) return;
+        const score = (matchScores && matchScores[m.id]) || {};
+        const hasScoreA = score.scoreA !== undefined && score.scoreA !== null && !isNaN(Number(score.scoreA));
+        const hasScoreB = score.scoreB !== undefined && score.scoreB !== null && !isNaN(Number(score.scoreB));
         const scoreA = hasScoreA ? Number(score.scoreA) : 0;
         const scoreB = hasScoreB ? Number(score.scoreB) : 0;
-        const isCompleted = Boolean(score?.completed);
+        const isCompleted = Boolean(score.completed);
         const isCounted = isCompleted || hasScoreA || hasScoreB;
 
+        // Defensive check: ensure both teamA and teamB are valid arrays with at least 2 players
+        const teamA = Array.isArray(m.teamA) ? m.teamA : [];
+        const teamB = Array.isArray(m.teamB) ? m.teamB : [];
+
+        if (teamA.length < 2 || teamB.length < 2 || !teamA[0] || !teamA[1] || !teamB[0] || !teamB[1]) {
+          return;
+        }
+
         const sides = [
-          { player: m.teamA[0], partner: m.teamA[1], opp: m.teamB, myScore: scoreA, oppScore: scoreB },
-          { player: m.teamA[1], partner: m.teamA[0], opp: m.teamB, myScore: scoreA, oppScore: scoreB },
-          { player: m.teamB[0], partner: m.teamB[1], opp: m.teamA, myScore: scoreB, oppScore: scoreA },
-          { player: m.teamB[1], partner: m.teamB[0], opp: m.teamA, myScore: scoreB, oppScore: scoreA },
+          { player: teamA[0], partner: teamA[1], opp: teamB, myScore: scoreA, oppScore: scoreB },
+          { player: teamA[1], partner: teamA[0], opp: teamB, myScore: scoreA, oppScore: scoreB },
+          { player: teamB[0], partner: teamB[1], opp: teamA, myScore: scoreB, oppScore: scoreA },
+          { player: teamB[1], partner: teamB[0], opp: teamA, myScore: scoreB, oppScore: scoreA },
         ];
 
         sides.forEach(({ player, partner, opp, myScore, oppScore }) => {
+          if (!player || !player.id) return;
           let rec = map.get(player.id);
           if (!rec) {
             rec = {
               player,
-              tierGroupLabel: m.tierGroupLabel,
+              tierGroupLabel: m.tierGroupLabel || '',
               matchesPlayed: 0,
               totalMatchesAssigned: 4,
               totalPointsWon: 0,
@@ -524,7 +542,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             map.set(player.id, rec);
           }
 
-          if (!rec.tierGroupLabel) {
+          if (!rec.tierGroupLabel && m.tierGroupLabel) {
             rec.tierGroupLabel = m.tierGroupLabel;
           }
 
@@ -547,13 +565,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }
           }
 
+          const partnerName = partner?.name || '未知搭檔';
+          const partnerLevel = partner?.level ?? 0;
+          const opp0Name = opp?.[0]?.name || '未知';
+          const opp0Level = opp?.[0]?.level ?? 0;
+          const opp1Name = opp?.[1]?.name || '未知';
+          const opp1Level = opp?.[1]?.level ?? 0;
+
           rec.history.push({
-            matchId: m.id,
-            roundNumber: m.roundNumber,
-            courtNumber: m.courtNumber,
-            partnerName: partner.name,
-            partnerLevel: partner.level,
-            opponentsText: `${opp[0].name}(Lv${opp[0].level}) & ${opp[1].name}(Lv${opp[1].level})`,
+            matchId: m.id || `m-${m.roundNumber || 0}-${m.courtNumber || 0}`,
+            roundNumber: m.roundNumber || 0,
+            courtNumber: m.courtNumber || 0,
+            partnerName,
+            partnerLevel,
+            opponentsText: `${opp0Name}(Lv${opp0Level}) & ${opp1Name}(Lv${opp1Level})`,
             myTeamScore: myScore,
             oppTeamScore: oppScore,
             result,
@@ -1063,14 +1088,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* Content: byRound View */}
           {scheduleViewMode === 'byRound' && courtSchedule && (
             <div className="space-y-4 sm:space-y-6">
-              {courtSchedule.rounds.map((round) => {
+              {(courtSchedule.rounds || []).map((round) => {
+                if (!round) return null;
                 // If a specific court filter is selected, check if this round has matches on that court
                 const courtsToRender =
                   selectedCourtFilter === 0 ? [1, 2, 3] : [selectedCourtFilter];
 
                 if (
                   selectedCourtFilter !== 0 &&
-                  !round.matches.some((m) => m.courtNumber === selectedCourtFilter)
+                  !(round.matches || []).some((m) => m && m.courtNumber === selectedCourtFilter)
                 ) {
                   return null;
                 }
@@ -1095,11 +1121,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       </div>
 
                       {/* Resting Players */}
-                      {round.restingPlayers.length > 0 && (
+                      {round.restingPlayers && round.restingPlayers.length > 0 && (
                         <div className="text-[11px] text-slate-500 bg-white px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1.5 overflow-hidden">
                           <span className="font-semibold text-slate-600 shrink-0">💤 本輪輪休：</span>
                           <span className="truncate">
-                            {round.restingPlayers.map((p) => `${p.name}`).join('、')}
+                            {round.restingPlayers.map((p) => p?.name || '').filter(Boolean).join('、')}
                           </span>
                         </div>
                       )}
@@ -1237,13 +1263,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                       )}
                                     </div>
                                     <div className="text-xs font-extrabold text-slate-900 truncate">
-                                      {match.teamA[0].name}{' '}
+                                      {match.teamA?.[0]?.name || '未定'}{' '}
                                       <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
-                                        Lv{match.teamA[0].level}
+                                        Lv{match.teamA?.[0]?.level ?? 0}
                                       </span>{' '}
-                                      & {match.teamA[1].name}{' '}
+                                      & {match.teamA?.[1]?.name || '未定'}{' '}
                                       <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
-                                        Lv{match.teamA[1].level}
+                                        Lv{match.teamA?.[1]?.level ?? 0}
                                       </span>
                                     </div>
                                   </div>
@@ -1311,13 +1337,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                       )}
                                     </div>
                                     <div className="text-xs font-extrabold text-slate-900 truncate">
-                                      {match.teamB[0].name}{' '}
+                                      {match.teamB?.[0]?.name || '未定'}{' '}
                                       <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
-                                        Lv{match.teamB[0].level}
+                                        Lv{match.teamB?.[0]?.level ?? 0}
                                       </span>{' '}
-                                      & {match.teamB[1].name}{' '}
+                                      & {match.teamB?.[1]?.name || '未定'}{' '}
                                       <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
-                                        Lv{match.teamB[1].level}
+                                        Lv{match.teamB?.[1]?.level ?? 0}
                                       </span>
                                     </div>
                                   </div>
@@ -1412,9 +1438,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                {Object.values(courtSchedule.playerStats).map((stat) => {
+                {Object.values(courtSchedule.playerStats || {}).map((stat) => {
+                  if (!stat || !stat.player) return null;
                   const isExpanded = expandedPlayerStats === stat.player.id;
-                  const tier = getTierByLevel(stat.player.level);
+                  const tier = getTierByLevel(stat.player.level ?? 0);
 
                   return (
                     <div
@@ -1454,9 +1481,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       {/* Expanded Match List */}
                       {isExpanded && (
                         <div className="pt-2 border-t border-slate-200 space-y-1.5 text-xs animate-in fade-in">
-                          {stat.matches.map((m, idx) => (
+                          {(stat.matches || []).map((m, idx) => (
                             <div
-                              key={m.matchId}
+                              key={m.matchId || `match-${idx}`}
                               className="p-2 bg-white rounded-lg border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px]"
                             >
                               <div className="flex items-center gap-1.5">
@@ -1464,13 +1491,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   第 {idx + 1} 場
                                 </span>
                                 <span className="font-bold text-emerald-700">
-                                  第 {m.roundNumber} 輪 · 場地 {m.courtNumber}
+                                  第 {m.roundNumber || 0} 輪 · 場地 {m.courtNumber || 0}
                                 </span>
                               </div>
                               <div className="text-slate-600">
-                                搭檔：<strong className="text-slate-900">{m.partner.name}</strong> vs{' '}
+                                搭檔：<strong className="text-slate-900">{m.partner?.name || '未定'}</strong> vs{' '}
                                 <span className="text-slate-700">
-                                  {m.opponents[0].name} & {m.opponents[1].name}
+                                  {m.opponents?.[0]?.name || '未定'} & {m.opponents?.[1]?.name || '未定'}
                                 </span>
                               </div>
                             </div>
@@ -1485,7 +1512,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           )}
 
           {/* Empty state if not generated or invalid count */}
-          {(!courtSchedule || courtSchedule.rounds.length === 0) && (
+          {(!courtSchedule || !Array.isArray(courtSchedule.rounds) || courtSchedule.rounds.length === 0) && (
             <div className="bg-white rounded-2xl p-6 sm:p-10 text-center border border-dashed border-slate-300 space-y-4">
               <div className={`w-14 h-14 rounded-2xl mx-auto flex items-center justify-center ${
                 fivePlayerStatus.isValid ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'
@@ -1587,19 +1614,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
               <span className="text-[11px] text-slate-500 font-bold block">最高個人總得分</span>
               <div className="text-xl font-black text-amber-600 mt-0.5">
-                {playerScoreStats[0] ? `${playerScoreStats[0].totalPointsWon} 分` : '0 分'}
+                {playerScoreStats?.[0] ? `${playerScoreStats[0].totalPointsWon} 分` : '0 分'}
               </div>
               <span className="text-[10px] text-slate-500 block mt-0.5 truncate">
-                {playerScoreStats[0] ? `暫居第 1 名：${playerScoreStats[0].player.name}` : '-'}
+                {playerScoreStats?.[0]?.player ? `暫居第 1 名：${playerScoreStats[0].player.name}` : '-'}
               </span>
             </div>
 
             <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
               <span className="text-[11px] text-slate-500 font-bold block">最高個人淨勝分</span>
               <div className="text-xl font-black text-emerald-600 mt-0.5">
-                {playerScoreStats.reduce((max, s) => Math.max(max, s.pointDifferential), 0) > 0
-                  ? `+${playerScoreStats.reduce((max, s) => Math.max(max, s.pointDifferential), 0)}`
-                  : `${playerScoreStats.reduce((max, s) => Math.max(max, s.pointDifferential), 0)}`}
+                {playerScoreStats && playerScoreStats.length > 0 && playerScoreStats.reduce((max, s) => Math.max(max, s?.pointDifferential ?? 0), 0) > 0
+                  ? `+${playerScoreStats.reduce((max, s) => Math.max(max, s?.pointDifferential ?? 0), 0)}`
+                  : `${playerScoreStats && playerScoreStats.length > 0 ? playerScoreStats.reduce((max, s) => Math.max(max, s?.pointDifferential ?? 0), 0) : 0}`}
               </div>
               <span className="text-[10px] text-slate-400 block mt-0.5">總得分 － 總失分</span>
             </div>
@@ -2324,7 +2351,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </p>
             </div>
 
-            {courtSchedule && courtSchedule.rounds.length > 0 ? (
+            {courtSchedule && Array.isArray(courtSchedule.rounds) && courtSchedule.rounds.length > 0 ? (
               <div className="space-y-6">
                 {courtSchedule.rounds.map((round) => (
                   <div key={round.roundNumber} className="border border-slate-300 rounded-xl p-4 space-y-3">
@@ -2332,15 +2359,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       <span className="font-extrabold text-base text-slate-900">
                         📍 第 {round.roundNumber} 輪次對戰表
                       </span>
-                      {round.restingPlayers.length > 0 && (
+                      {round.restingPlayers && round.restingPlayers.length > 0 && (
                         <span className="text-xs text-slate-500">
-                          輪休：{round.restingPlayers.map((p) => p.name).join('、')}
+                          輪休：{round.restingPlayers.map((p) => p?.name || '').filter(Boolean).join('、')}
                         </span>
                       )}
                     </div>
                     <div className="grid grid-cols-3 gap-3 text-xs">
                       {[1, 2, 3].map((cNum) => {
-                        const m = round.matches.find((match) => match.courtNumber === cNum);
+                        const m = (round.matches || []).find((match) => match && match.courtNumber === cNum);
                         if (!m) {
                           return (
                             <div
@@ -2357,14 +2384,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         return (
                           <div key={m.id} className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-1">
                             <span className="font-bold text-slate-800 block text-[11px]">
-                              場地 {m.courtNumber} ({m.tierGroupLabel})
+                              場地 {m.courtNumber} ({m.tierGroupLabel || ''})
                             </span>
                             <div className="font-semibold text-slate-900">
-                              {m.teamA[0].name} & {m.teamA[1].name}
+                              {m.teamA?.[0]?.name || '未定'} & {m.teamA?.[1]?.name || '未定'}
                             </div>
                             <div className="text-slate-400 font-bold text-center">VS</div>
                             <div className="font-semibold text-slate-900">
-                              {m.teamB[0].name} & {m.teamB[1].name}
+                              {m.teamB?.[0]?.name || '未定'} & {m.teamB?.[1]?.name || '未定'}
                             </div>
                           </div>
                         );
