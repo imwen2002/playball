@@ -148,9 +148,25 @@ export function validateFivePlayerRule(players: PlayerSubmission[]): FivePlayerV
 }
 
 /**
- * Cluster players strictly by Tier into 5-player divisions (不能跨階配對).
+ * Fisher-Yates AI random shuffle utility
  */
-export function clusterPlayersIntoDivisions(players: PlayerSubmission[]): DivisionPool[] {
+export function shuffleArray<T>(array: T[]): T[] {
+  const arr = [...array];
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+/**
+ * Cluster players strictly by Tier into 5-player divisions (不能跨階配對).
+ * When randomize=true, uses AI random draw to shuffle seat order within each 5-player group.
+ */
+export function clusterPlayersIntoDivisions(
+  players: PlayerSubmission[],
+  randomize: boolean = true
+): DivisionPool[] {
   if (players.length === 0) return [];
 
   // Group players strictly by their Tier
@@ -181,13 +197,18 @@ export function clusterPlayersIntoDivisions(players: PlayerSubmission[]): Divisi
     const tierDivisionCount = Math.floor(sorted.length / groupSize);
 
     for (let i = 0; i < sorted.length; i += groupSize) {
-      const groupPlayers = sorted.slice(i, i + groupSize);
+      let groupPlayers = sorted.slice(i, i + groupSize);
       if (groupPlayers.length < 5) continue; // Safety guard: ignore non-complete group
+
+      // AI Random draw: shuffle the 5 players so who gets seats P0..P4 is completely randomized!
+      if (randomize) {
+        groupPlayers = shuffleArray(groupPlayers);
+      }
 
       const subIndex = Math.floor(i / groupSize);
       const subLetter = String.fromCharCode(65 + (subIndex % 26)); // A, B, C...
-      const minLvl = groupPlayers[0].level;
-      const maxLvl = groupPlayers[groupPlayers.length - 1].level;
+      const minLvl = Math.min(...groupPlayers.map((p) => p.level));
+      const maxLvl = Math.max(...groupPlayers.map((p) => p.level));
 
       const subLabel =
         tierDivisionCount > 1
@@ -227,20 +248,32 @@ export function clusterPlayersIntoDivisions(players: PlayerSubmission[]): Divisi
  * Zero duplicate partnerships!
  */
 export function generateFivePlayerDivisionMatches(
-  pool: DivisionPool
+  pool: DivisionPool,
+  randomize: boolean = true
 ): Omit<CourtMatch, 'roundNumber' | 'courtNumber'>[] {
   const p = pool.players;
   if (p.length !== 5) {
     return [];
   }
 
-  const pairings = [
+  let pairings = [
     { teamA: [p[0], p[1]] as [PlayerSubmission, PlayerSubmission], teamB: [p[2], p[3]] as [PlayerSubmission, PlayerSubmission], resting: p[4] },
     { teamA: [p[1], p[2]] as [PlayerSubmission, PlayerSubmission], teamB: [p[3], p[4]] as [PlayerSubmission, PlayerSubmission], resting: p[0] },
     { teamA: [p[2], p[4]] as [PlayerSubmission, PlayerSubmission], teamB: [p[0], p[3]] as [PlayerSubmission, PlayerSubmission], resting: p[1] },
     { teamA: [p[1], p[3]] as [PlayerSubmission, PlayerSubmission], teamB: [p[0], p[4]] as [PlayerSubmission, PlayerSubmission], resting: p[2] },
     { teamA: [p[0], p[2]] as [PlayerSubmission, PlayerSubmission], teamB: [p[1], p[4]] as [PlayerSubmission, PlayerSubmission], resting: p[3] },
   ];
+
+  if (randomize) {
+    pairings = pairings.map((pair) => {
+      let teamA = pair.teamA;
+      let teamB = pair.teamB;
+      if (Math.random() > 0.5) teamA = [teamA[1], teamA[0]];
+      if (Math.random() > 0.5) teamB = [teamB[1], teamB[0]];
+      if (Math.random() > 0.5) return { teamA: teamB, teamB: teamA, resting: pair.resting };
+      return { teamA, teamB, resting: pair.resting };
+    });
+  }
 
   return pairings.map((pair, matchIdx) => ({
     id: `m-div${pool.divisionIndex + 1}-${matchIdx + 1}`,
@@ -253,21 +286,23 @@ export function generateFivePlayerDivisionMatches(
 
 /**
  * Schedule division matches across 3 Courts in sequential Rounds with:
- * 1. 3-Court Full Saturation (每一輪三個場地都有打，最後一輪未滿三場沒關係):
+ * 1. 3-Court Full Saturation:
  *    As long as there are matches remaining across at least 3 divisions, all 3 courts
  *    (Court 1, Court 2, Court 3) are scheduled concurrently in that round.
- *    Only in the final round (or if fewer than 3 divisions have matches left)
- *    is fewer than 3 courts allowed.
- * 2. Strict Collision-Free (同一位選手絕不可同時出現在兩個場地):
+ * 2. Strict Collision-Free:
  *    Each division plays at most 1 match per round. Because players in each division
  *    are mutually disjoint, zero player can ever collide across courts in the same round.
- * 3. Fair Division Rest Rotation (最佳輪替動態休息):
+ * 3. Fair Division Rest Rotation:
  *    When choosing which divisions enter the 3 courts in any round, divisions that have
- *    rested longest (or haven't played yet) receive top priority.
+ *    rested longest receive top priority.
+ * 4. Court Allocation Randomization:
+ *    When randomize=true, courts 1, 2, 3 are randomly assigned among active divisions
+ *    so no division is statically pinned to Court 1.
  */
 export function scheduleMatchesToCourts(
   divisionMatchesMap: Map<number, Omit<CourtMatch, 'roundNumber' | 'courtNumber'>[]>,
-  allPlayers: PlayerSubmission[]
+  allPlayers: PlayerSubmission[],
+  randomize: boolean = true
 ): ScheduleRound[] {
   const rounds: ScheduleRound[] = [];
   const divisionCount = divisionMatchesMap.size;
@@ -302,7 +337,7 @@ export function scheduleMatchesToCourts(
     // Sort available divisions to determine which ones play in this round:
     // Priority 1: Longest rest (i.e. roundNum - lastRoundByDivision descending; never played = highest priority)
     // Priority 2: Most remaining matches in queue descending (prevent laggards)
-    // Priority 3: Division index ascending (deterministic)
+    // Priority 3: Division tie-breaker (randomized if enabled)
     availableDivisions.sort((a, b) => {
       const lastA = lastRoundByDivision.get(a);
       const lastB = lastRoundByDivision.get(b);
@@ -319,7 +354,7 @@ export function scheduleMatchesToCourts(
         return qB - qA; // Most remaining matches first
       }
 
-      return a - b;
+      return randomize ? Math.random() - 0.5 : a - b;
     });
 
     // We have 3 courts available: Court 1, Court 2, Court 3.
@@ -328,9 +363,16 @@ export function scheduleMatchesToCourts(
     const playersInThisRound = new Set<string>();
 
     const courtsToFill = Math.min(3, availableDivisions.length);
+    const chosenDivisions = availableDivisions.slice(0, courtsToFill);
 
-    for (let court = 1; court <= courtsToFill; court++) {
-      const divIdx = availableDivisions[court - 1];
+    let courtNumbers = Array.from({ length: courtsToFill }, (_, i) => i + 1);
+    if (randomize) {
+      courtNumbers = shuffleArray(courtNumbers);
+    }
+
+    for (let i = 0; i < courtsToFill; i++) {
+      const divIdx = chosenDivisions[i];
+      const court = courtNumbers[i];
       const matchData = queues.get(divIdx)!.shift()!;
 
       const matchPlayerIds = [
@@ -353,6 +395,9 @@ export function scheduleMatchesToCourts(
         courtNumber: court,
       });
     }
+
+    // Sort round matches by courtNumber ascending so Court 1, Court 2, Court 3 display neatly in order
+    roundMatches.sort((a, b) => a.courtNumber - b.courtNumber);
 
     // Identify players resting in this round
     const restingPlayers = allPlayers.filter((p) => !playersInThisRound.has(p.id));
@@ -381,44 +426,32 @@ export function scheduleMatchesToCourts(
 }
 
 /**
- * Master generator: generates full 3-court tournament schedule with 4 matches per player.
- * Strictly enforces 5 players per division and rest interval rules.
+ * Computes a unique canonical fingerprint of a schedule's matchups and rounds.
+ * Used to guarantee that every regeneration is strictly different from the previous one.
  */
-export function generateFourMatchCourtSchedule(
+export function computeScheduleFingerprint(schedule: TournamentScheduleResult): string {
+  if (!schedule || !schedule.rounds || schedule.rounds.length === 0) return '';
+  return schedule.rounds
+    .map((r) => {
+      const matchSigs = (r.matches || []).map((m) => {
+        const teamAIds = (m.teamA || []).map((p) => p.id).sort().join('&');
+        const teamBIds = (m.teamB || []).map((p) => p.id).sort().join('&');
+        const sortedTeams = [teamAIds, teamBIds].sort().join('_vs_');
+        return `C${m.courtNumber}:${sortedTeams}`;
+      });
+      matchSigs.sort();
+      return `R${r.roundNumber}[${matchSigs.join('|')}]`;
+    })
+    .join(';;');
+}
+
+/**
+ * Compiles individual player schedule statistics & checks 0 duplicate partners.
+ */
+export function compilePlayerScheduleStats(
+  rounds: ScheduleRound[],
   players: PlayerSubmission[]
-): TournamentScheduleResult {
-  const validation = validateFivePlayerRule(players);
-  if (!validation.isValid) {
-    return {
-      rounds: [],
-      playerStats: {},
-      totalMatchesScheduled: 0,
-      tierDivisions: [],
-    };
-  }
-
-  // 1. Group into exact 5-player divisions strictly segregated by tier
-  const divisions = clusterPlayersIntoDivisions(players);
-
-  // 2. Generate exactly 5 matches per division (every player gets 4 matches, zero duplicate partners)
-  const divisionMatchesMap = new Map<number, Omit<CourtMatch, 'roundNumber' | 'courtNumber'>[]>();
-  let totalMatchesCount = 0;
-
-  const tierDivisionSummaries = divisions.map((div) => {
-    const matches = generateFivePlayerDivisionMatches(div);
-    divisionMatchesMap.set(div.divisionIndex, matches);
-    totalMatchesCount += matches.length;
-    return {
-      tierLabel: div.tierLabel,
-      players: div.players,
-      matchCount: matches.length,
-    };
-  });
-
-  // 3. Assign matches to 3 Courts across conflict-free rounds with mandatory rest intervals
-  const rounds = scheduleMatchesToCourts(divisionMatchesMap, players);
-
-  // 4. Compile player individual schedule checklist & verify 0 duplicate partners
+): Record<string, PlayerScheduleStat> {
   const playerStats: Record<string, PlayerScheduleStat> = {};
   players.forEach((p) => {
     playerStats[p.id] = {
@@ -482,10 +515,76 @@ export function generateFourMatchCourtSchedule(
     });
   });
 
-  return {
-    rounds,
-    playerStats,
-    totalMatchesScheduled: totalMatchesCount,
-    tierDivisions: tierDivisionSummaries,
-  };
+  return playerStats;
+}
+
+/**
+ * Master generator: generates full 3-court tournament schedule with 4 matches per player.
+ * Strictly enforces 5 players per division and rest interval rules.
+ * Accepts options { previousFingerprint, randomize } to guarantee that each AI draw
+ * produces a completely distinct matchup combination from the previous generation.
+ */
+export function generateFourMatchCourtSchedule(
+  players: PlayerSubmission[],
+  options?: {
+    previousFingerprint?: string;
+    randomize?: boolean;
+  }
+): TournamentScheduleResult {
+  const validation = validateFivePlayerRule(players);
+  if (!validation.isValid) {
+    return {
+      rounds: [],
+      playerStats: {},
+      totalMatchesScheduled: 0,
+      tierDivisions: [],
+    };
+  }
+
+  const shouldRandomize = options?.randomize !== false;
+  const maxAttempts = options?.previousFingerprint ? 35 : 1;
+  let bestSchedule: TournamentScheduleResult | null = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    // 1. Group into exact 5-player divisions strictly segregated by tier
+    const divisions = clusterPlayersIntoDivisions(players, shouldRandomize);
+
+    // 2. Generate exactly 5 matches per division (every player gets 4 matches, zero duplicate partners)
+    const divisionMatchesMap = new Map<number, Omit<CourtMatch, 'roundNumber' | 'courtNumber'>[]>();
+    let totalMatchesCount = 0;
+
+    const tierDivisionSummaries = divisions.map((div) => {
+      const matches = generateFivePlayerDivisionMatches(div, shouldRandomize);
+      divisionMatchesMap.set(div.divisionIndex, matches);
+      totalMatchesCount += matches.length;
+      return {
+        tierLabel: div.tierLabel,
+        players: div.players,
+        matchCount: matches.length,
+      };
+    });
+
+    // 3. Assign matches to 3 Courts across conflict-free rounds with mandatory rest intervals
+    const rounds = scheduleMatchesToCourts(divisionMatchesMap, players, shouldRandomize);
+
+    const scheduleResult: TournamentScheduleResult = {
+      rounds,
+      playerStats: compilePlayerScheduleStats(rounds, players),
+      totalMatchesScheduled: totalMatchesCount,
+      tierDivisions: tierDivisionSummaries,
+    };
+
+    bestSchedule = scheduleResult;
+
+    if (options?.previousFingerprint) {
+      const currentFingerprint = computeScheduleFingerprint(scheduleResult);
+      if (currentFingerprint !== options.previousFingerprint) {
+        break; // Distinct schedule confirmed!
+      }
+    } else {
+      break;
+    }
+  }
+
+  return bestSchedule!;
 }

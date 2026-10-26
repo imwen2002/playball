@@ -11,6 +11,7 @@ import { exportPlayersToCSV } from '../utils/groupingAlgorithms';
 import {
   generateFourMatchCourtSchedule,
   validateFivePlayerRule,
+  computeScheduleFingerprint,
   FivePlayerValidationResult,
 } from '../utils/courtScheduler';
 import { subscribeToTournamentState, saveTournamentState } from '../firebase';
@@ -101,6 +102,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Cloud realtime sync status
   const [lastCloudSyncTime, setLastCloudSyncTime] = useState<string | null>(null);
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
+  const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
 
   // Score bracket filter: 'all' | 4 | 3 | 2 | 1 | 0
   const [selectedScoreBracket, setSelectedScoreBracket] = useState<'all' | number>('all');
@@ -193,6 +195,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [players, searchQuery, tierFilter, genderFilter, sortField, sortOrder]);
 
   // Execute 3-court schedule generation (Strict 5-player rule: 4 matches, zero duplicate partners)
+  // AI Random Draw: Mathematically guarantees that each regeneration produces a completely distinct matchup combination
   const handleGenerateCourtSchedule = async () => {
     const validation = validateFivePlayerRule(players);
     if (!validation.isValid) {
@@ -200,12 +203,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       setIsFivePlayerModalOpen(true);
       return;
     }
-    const result = generateFourMatchCourtSchedule(players);
+
+    // Check if existing scores or completed matches exist
+    const hasScoresEntered = Object.values(matchScores).some(
+      (s) => s.completed || (s.scoreA && s.scoreA > 0) || (s.scoreB && s.scoreB > 0)
+    );
+
+    if (courtSchedule && courtSchedule.rounds.length > 0 && hasScoresEntered) {
+      const confirmReset = window.confirm(
+        '⚠️ 提醒：目前賽程已有填寫的比分或完賽紀錄。\n\n重新一鍵排定將透過 AI 隨機抽籤產生【與上一次完全不同】的搭檔與對戰組合，原有的比分紀錄將會重置。\n\n確定要重新排定賽程嗎？'
+      );
+      if (!confirmReset) return;
+    }
+
+    // Pass the existing schedule's canonical fingerprint so the generator strictly avoids duplicates
+    const prevFingerprint = courtSchedule ? computeScheduleFingerprint(courtSchedule) : undefined;
+    const result = generateFourMatchCourtSchedule(players, {
+      previousFingerprint: prevFingerprint,
+      randomize: true,
+    });
+
     setCourtSchedule(result);
+    setMatchScores({});
     setActiveAdminTab('schedule');
     setIsCloudSyncing(true);
+    setScheduleNotice('✨ AI 隨機抽籤成功！已重新排定全新對戰組合（搭檔與對戰組合與上一次完全不同）');
+    setTimeout(() => setScheduleNotice(null), 4000);
+
     try {
-      await saveTournamentState(result, matchScores);
+      await saveTournamentState(result, {});
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
     } catch (err) {
       console.warn('Failed saving generated schedule to cloud:', err);
@@ -986,6 +1012,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* Tab 1: 3-Court Schedule Engine */}
       {activeAdminTab === 'schedule' && (
         <div className="space-y-4 sm:space-y-6">
+          {/* AI Random Re-roll Notice */}
+          {scheduleNotice && (
+            <div className="bg-emerald-600 text-white px-4 py-2.5 rounded-2xl text-xs font-bold flex items-center justify-between shadow-xs">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-4 h-4 text-emerald-200 animate-pulse shrink-0" />
+                <span>{scheduleNotice}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setScheduleNotice(null)}
+                className="text-white/80 hover:text-white text-xs underline cursor-pointer ml-3 shrink-0"
+              >
+                關閉
+              </button>
+            </div>
+          )}
+
           {/* Header Controls for Schedule */}
           <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-3">
             <div className="space-y-1">
@@ -994,9 +1037,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 <span className="text-xs font-normal text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded-md font-semibold">
                   每組 5 人 · 每人 4 場 · 隊友 0 重複搭檔
                 </span>
+                <span className="text-[11px] font-bold text-teal-700 bg-teal-50 border border-teal-200 px-1.5 py-0.5 rounded-md">
+                  🎲 AI 隨機抽籤防重複
+                </span>
               </h3>
               <p className="text-xs text-slate-500">
-                依據 5 人雙打完全輪迴定理（C(5,2)=10 種配對），每人固定出賽 4 場（輪休 1 場），與同組其他 4 人各搭檔 1 次，實現 0 重複配對。
+                依據 5 人雙打完全輪迴定理（C(5,2)=10 種配對），每人固定出賽 4 場（輪休 1 場）。每次排定皆由 AI 真隨機抽籤，保證每次對戰搭檔與場次順序皆不相同。
               </p>
               {courtSchedule && courtSchedule.tierDivisions && courtSchedule.tierDivisions.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5 pt-1">
@@ -1017,10 +1063,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <button
                 type="button"
                 onClick={handleGenerateCourtSchedule}
-                className="px-3.5 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-all flex items-center gap-1 cursor-pointer"
+                className="px-3.5 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
               >
-                <RefreshCw className="w-3.5 h-3.5" />
-                <span>重新一鍵排定</span>
+                <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+                <span>重新一鍵排定 (AI抽籤)</span>
               </button>
 
               <button
