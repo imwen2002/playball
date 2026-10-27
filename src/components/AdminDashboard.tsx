@@ -4,6 +4,7 @@ import {
   TournamentScheduleResult,
   CourtMatch,
   ScheduleRound,
+  MatchSubstitutionRecord,
 } from '../types';
 import { BADMINTON_TIERS, getTierByLevel } from '../data/badmintonTiers';
 import { SAMPLE_PLAYERS } from '../data/samplePlayers';
@@ -44,6 +45,11 @@ import {
   Trophy,
   Medal,
   Flame,
+  UserPlus,
+  ArrowRightLeft,
+  UserCheck,
+  Activity,
+  X,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -146,6 +152,205 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Copy notice
   const [hasCopiedText, setHasCopiedText] = useState(false);
+
+  // Substitution Modal State (Scheme A: Match Player Substitution for Injury/Emergency)
+  const [subModalState, setSubModalState] = useState<{
+    isOpen: boolean;
+    match: CourtMatch | null;
+    round: ScheduleRound | null;
+    targetPlayer: PlayerSubmission | null;
+    targetTeam: 'A' | 'B' | null;
+    existingSub: MatchSubstitutionRecord | null;
+  }>({
+    isOpen: false,
+    match: null,
+    round: null,
+    targetPlayer: null,
+    targetTeam: null,
+    existingSub: null,
+  });
+
+  const [subSourceType, setSubSourceType] = useState<'resting' | 'roster' | 'custom'>('resting');
+  const [subSelectedRosterId, setSubSelectedRosterId] = useState<string>('');
+  const [subCustomName, setSubCustomName] = useState<string>('');
+  const [subCustomLevel, setSubCustomLevel] = useState<number>(1);
+  const [subReason, setSubReason] = useState<string>('身體受傷 / 拉傷');
+  const [subScope, setSubScope] = useState<'single_match' | 'remaining_matches'>('single_match');
+
+  // Open substitution modal for a specific player in a match
+  const handleOpenSubstitutionModal = (
+    match: CourtMatch,
+    round: ScheduleRound,
+    targetPlayer: PlayerSubmission,
+    targetTeam: 'A' | 'B'
+  ) => {
+    const existingSub = match.substitutions?.[targetPlayer.id] || null;
+
+    // Default source type: if resting players exist, default to 'resting'; else 'roster'
+    const hasResting = round.restingPlayers && round.restingPlayers.length > 0;
+    let initialSource: 'resting' | 'roster' | 'custom' = hasResting ? 'resting' : 'roster';
+    let initialRosterId = '';
+    let initialCustomName = '';
+    let initialCustomLevel = targetPlayer.level;
+    let initialReason = '身體受傷 / 拉傷';
+    let initialScope: 'single_match' | 'remaining_matches' = 'single_match';
+
+    if (existingSub) {
+      if (existingSub.isRestingPlayer) {
+        initialSource = 'resting';
+      } else if (existingSub.substitutePlayerId) {
+        initialSource = 'roster';
+        initialRosterId = existingSub.substitutePlayerId;
+      } else {
+        initialSource = 'custom';
+        initialCustomName = existingSub.substituteName;
+        initialCustomLevel = existingSub.substituteLevel;
+      }
+      initialReason = existingSub.reason || '身體受傷 / 拉傷';
+      initialScope = existingSub.scope || 'single_match';
+    }
+
+    setSubSourceType(initialSource);
+    setSubSelectedRosterId(initialRosterId);
+    setSubCustomName(initialCustomName);
+    setSubCustomLevel(initialCustomLevel);
+    setSubReason(initialReason);
+    setSubScope(initialScope);
+
+    setSubModalState({
+      isOpen: true,
+      match,
+      round,
+      targetPlayer,
+      targetTeam,
+      existingSub,
+    });
+  };
+
+  const handleCloseSubstitutionModal = () => {
+    setSubModalState({
+      isOpen: false,
+      match: null,
+      round: null,
+      targetPlayer: null,
+      targetTeam: null,
+      existingSub: null,
+    });
+  };
+
+  // Submit substitution (Save to courtSchedule and cloud)
+  const handleApplySubstitution = async (options: {
+    subName: string;
+    subLevel: number;
+    subId?: string;
+    isResting?: boolean;
+    reason: string;
+    scope: 'single_match' | 'remaining_matches';
+  }) => {
+    if (!courtSchedule || !subModalState.match || !subModalState.targetPlayer) return;
+
+    const targetId = subModalState.targetPlayer.id;
+    const currentMatchId = subModalState.match.id;
+    const currentRoundNum = subModalState.match.roundNumber;
+    const cleanSubName = options.subName.trim();
+    if (!cleanSubName) return;
+
+    const newSubRecord: MatchSubstitutionRecord = {
+      originalPlayerId: targetId,
+      originalPlayerName: subModalState.targetPlayer.name,
+      substitutePlayerId: options.subId,
+      substituteName: cleanSubName,
+      substituteLevel: options.subLevel,
+      isRestingPlayer: options.isResting,
+      reason: options.reason,
+      scope: options.scope,
+      timestamp: new Date().toISOString(),
+    };
+
+    const updatedSchedule: TournamentScheduleResult = JSON.parse(JSON.stringify(courtSchedule));
+    let replacedCount = 0;
+
+    updatedSchedule.rounds.forEach((round) => {
+      (round.matches || []).forEach((m) => {
+        if (!m) return;
+        const isThisMatch = m.id === currentMatchId;
+        const isSubsequentMatch = m.roundNumber >= currentRoundNum;
+        const hasPlayer =
+          (m.teamA && (m.teamA[0]?.id === targetId || m.teamA[1]?.id === targetId)) ||
+          (m.teamB && (m.teamB[0]?.id === targetId || m.teamB[1]?.id === targetId));
+
+        if (hasPlayer) {
+          if (isThisMatch || (options.scope === 'remaining_matches' && isSubsequentMatch)) {
+            if (!matchScores[m.id]?.completed || isThisMatch) {
+              if (!m.substitutions) m.substitutions = {};
+              m.substitutions[targetId] = newSubRecord;
+              replacedCount++;
+            }
+          }
+        }
+      });
+    });
+
+    setCourtSchedule(updatedSchedule);
+    handleCloseSubstitutionModal();
+    setIsCloudSyncing(true);
+    setScheduleNotice(
+      `✨ 已成功指派【${cleanSubName}】替換【${subModalState.targetPlayer.name}】（共更換 ${replacedCount} 場），已即時同步雲端！`
+    );
+    setTimeout(() => setScheduleNotice(null), 4500);
+
+    try {
+      await saveTournamentState(updatedSchedule, matchScores);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed saving substitution to cloud:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  // Revert/Remove substitution
+  const handleRemoveSubstitution = async (cancelAllRemaining: boolean = false) => {
+    if (!courtSchedule || !subModalState.match || !subModalState.targetPlayer) return;
+
+    const targetId = subModalState.targetPlayer.id;
+    const currentMatchId = subModalState.match.id;
+    const currentRoundNum = subModalState.match.roundNumber;
+
+    const updatedSchedule: TournamentScheduleResult = JSON.parse(JSON.stringify(courtSchedule));
+    let revertedCount = 0;
+
+    updatedSchedule.rounds.forEach((round) => {
+      (round.matches || []).forEach((m) => {
+        if (!m || !m.substitutions || !m.substitutions[targetId]) return;
+        const isThisMatch = m.id === currentMatchId;
+        const isSubsequentMatch = m.roundNumber >= currentRoundNum;
+
+        if (isThisMatch || (cancelAllRemaining && isSubsequentMatch)) {
+          delete m.substitutions[targetId];
+          if (Object.keys(m.substitutions).length === 0) {
+            delete m.substitutions;
+          }
+          revertedCount++;
+        }
+      });
+    });
+
+    setCourtSchedule(updatedSchedule);
+    handleCloseSubstitutionModal();
+    setIsCloudSyncing(true);
+    setScheduleNotice(`✓ 已復原【${subModalState.targetPlayer.name}】原出賽身分（取消代打共 ${revertedCount} 場）！`);
+    setTimeout(() => setScheduleNotice(null), 4000);
+
+    try {
+      await saveTournamentState(updatedSchedule, matchScores);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed saving substitution revert to cloud:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
 
   // Detect which of the 16 sample players are present
   const samplePlayersInRoster = useMemo(() => {
@@ -482,6 +687,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       losses: number;
       draws: number;
       winRate: number;
+      hasAnySubstitution?: boolean;
       history: {
         matchId: string;
         roundNumber: number;
@@ -493,6 +699,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         oppTeamScore: number;
         result: 'win' | 'loss' | 'draw' | 'pending';
         completed: boolean;
+        substituteNote?: string;
       }[];
     }
 
@@ -512,6 +719,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         losses: 0,
         draws: 0,
         winRate: 0,
+        hasAnySubstitution: false,
         history: [],
       });
     });
@@ -563,6 +771,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               losses: 0,
               draws: 0,
               winRate: 0,
+              hasAnySubstitution: false,
               history: [],
             };
             map.set(player.id, rec);
@@ -570,6 +779,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           if (!rec.tierGroupLabel && m.tierGroupLabel) {
             rec.tierGroupLabel = m.tierGroupLabel;
+          }
+
+          // Check if this player was substituted in this match
+          const sub = m.substitutions?.[player.id];
+          if (sub) {
+            rec.hasAnySubstitution = true;
           }
 
           let result: 'win' | 'loss' | 'draw' | 'pending' = 'pending';
@@ -591,11 +806,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }
           }
 
-          const partnerName = partner?.name || '未知搭檔';
+          const partnerSub = m.substitutions?.[partner?.id];
+          const partnerName = partnerSub
+            ? `${partner?.name || '未知搭檔'} (由 ${partnerSub.substituteName} 代)`
+            : partner?.name || '未知搭檔';
           const partnerLevel = partner?.level ?? 0;
-          const opp0Name = opp?.[0]?.name || '未知';
+          const opp0Sub = m.substitutions?.[opp?.[0]?.id];
+          const opp0Name = opp0Sub ? `${opp?.[0]?.name}(${opp0Sub.substituteName}代)` : opp?.[0]?.name || '未知';
           const opp0Level = opp?.[0]?.level ?? 0;
-          const opp1Name = opp?.[1]?.name || '未知';
+          const opp1Sub = m.substitutions?.[opp?.[1]?.id];
+          const opp1Name = opp1Sub ? `${opp?.[1]?.name}(${opp1Sub.substituteName}代)` : opp?.[1]?.name || '未知';
           const opp1Level = opp?.[1]?.level ?? 0;
 
           rec.history.push({
@@ -609,6 +829,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             oppTeamScore: oppScore,
             result,
             completed: isCompleted,
+            substituteNote: sub ? `由 ${sub.substituteName} 代打 (${sub.reason || '代打'})` : undefined,
           });
         });
       });
@@ -1308,15 +1529,98 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         </span>
                                       )}
                                     </div>
-                                    <div className="text-xs font-extrabold text-slate-900 truncate">
-                                      {match.teamA?.[0]?.name || '未定'}{' '}
-                                      <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
-                                        Lv{match.teamA?.[0]?.level ?? 0}
-                                      </span>{' '}
-                                      & {match.teamA?.[1]?.name || '未定'}{' '}
-                                      <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
-                                        Lv{match.teamA?.[1]?.level ?? 0}
-                                      </span>
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        {/* Team A Player 1 */}
+                                        {(() => {
+                                          const p = match.teamA?.[0];
+                                          if (!p) return <span className="text-slate-400">未定</span>;
+                                          const sub = match.substitutions?.[p.id];
+                                          return (
+                                            <div className="inline-flex items-center gap-1 bg-white/70 px-1.5 py-0.5 rounded-lg border border-slate-200/80">
+                                              {sub ? (
+                                                <span className="inline-flex items-center gap-1 text-[11px]">
+                                                  <span className="line-through text-slate-400 font-medium" title={`原選手：${p.name} (Lv${p.level})`}>
+                                                    {p.name}
+                                                  </span>
+                                                  <span className="font-black text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded inline-flex items-center gap-0.5 shadow-2xs">
+                                                    <span>➔ {sub.substituteName}</span>
+                                                    <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
+                                                  </span>
+                                                </span>
+                                              ) : (
+                                                <span className="font-extrabold text-slate-900 text-xs inline-flex items-center gap-1">
+                                                  <span>{p.name}</span>
+                                                  <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
+                                                    Lv{p.level ?? 0}
+                                                  </span>
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                disabled={isDone}
+                                                onClick={() => handleOpenSubstitutionModal(match, round, p, 'A')}
+                                                title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
+                                                className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                                  isDone
+                                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                                    : sub
+                                                    ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
+                                                    : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
+                                                }`}
+                                              >
+                                                <ArrowRightLeft className="w-3 h-3" />
+                                              </button>
+                                            </div>
+                                          );
+                                        })()}
+
+                                        <span className="text-slate-400 font-bold text-xs">&</span>
+
+                                        {/* Team A Player 2 */}
+                                        {(() => {
+                                          const p = match.teamA?.[1];
+                                          if (!p) return <span className="text-slate-400">未定</span>;
+                                          const sub = match.substitutions?.[p.id];
+                                          return (
+                                            <div className="inline-flex items-center gap-1 bg-white/70 px-1.5 py-0.5 rounded-lg border border-slate-200/80">
+                                              {sub ? (
+                                                <span className="inline-flex items-center gap-1 text-[11px]">
+                                                  <span className="line-through text-slate-400 font-medium" title={`原選手：${p.name} (Lv${p.level})`}>
+                                                    {p.name}
+                                                  </span>
+                                                  <span className="font-black text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded inline-flex items-center gap-0.5 shadow-2xs">
+                                                    <span>➔ {sub.substituteName}</span>
+                                                    <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
+                                                  </span>
+                                                </span>
+                                              ) : (
+                                                <span className="font-extrabold text-slate-900 text-xs inline-flex items-center gap-1">
+                                                  <span>{p.name}</span>
+                                                  <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
+                                                    Lv{p.level ?? 0}
+                                                  </span>
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                disabled={isDone}
+                                                onClick={() => handleOpenSubstitutionModal(match, round, p, 'A')}
+                                                title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
+                                                className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                                  isDone
+                                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                                    : sub
+                                                    ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
+                                                    : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
+                                                }`}
+                                              >
+                                                <ArrowRightLeft className="w-3 h-3" />
+                                              </button>
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
                                     </div>
                                   </div>
 
@@ -1382,15 +1686,98 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         </span>
                                       )}
                                     </div>
-                                    <div className="text-xs font-extrabold text-slate-900 truncate">
-                                      {match.teamB?.[0]?.name || '未定'}{' '}
-                                      <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
-                                        Lv{match.teamB?.[0]?.level ?? 0}
-                                      </span>{' '}
-                                      & {match.teamB?.[1]?.name || '未定'}{' '}
-                                      <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
-                                        Lv{match.teamB?.[1]?.level ?? 0}
-                                      </span>
+                                    <div className="space-y-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        {/* Team B Player 1 */}
+                                        {(() => {
+                                          const p = match.teamB?.[0];
+                                          if (!p) return <span className="text-slate-400">未定</span>;
+                                          const sub = match.substitutions?.[p.id];
+                                          return (
+                                            <div className="inline-flex items-center gap-1 bg-white/70 px-1.5 py-0.5 rounded-lg border border-slate-200/80">
+                                              {sub ? (
+                                                <span className="inline-flex items-center gap-1 text-[11px]">
+                                                  <span className="line-through text-slate-400 font-medium" title={`原選手：${p.name} (Lv${p.level})`}>
+                                                    {p.name}
+                                                  </span>
+                                                  <span className="font-black text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded inline-flex items-center gap-0.5 shadow-2xs">
+                                                    <span>➔ {sub.substituteName}</span>
+                                                    <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
+                                                  </span>
+                                                </span>
+                                              ) : (
+                                                <span className="font-extrabold text-slate-900 text-xs inline-flex items-center gap-1">
+                                                  <span>{p.name}</span>
+                                                  <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
+                                                    Lv{p.level ?? 0}
+                                                  </span>
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                disabled={isDone}
+                                                onClick={() => handleOpenSubstitutionModal(match, round, p, 'B')}
+                                                title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
+                                                className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                                  isDone
+                                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                                    : sub
+                                                    ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
+                                                    : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
+                                                }`}
+                                              >
+                                                <ArrowRightLeft className="w-3 h-3" />
+                                              </button>
+                                            </div>
+                                          );
+                                        })()}
+
+                                        <span className="text-slate-400 font-bold text-xs">&</span>
+
+                                        {/* Team B Player 2 */}
+                                        {(() => {
+                                          const p = match.teamB?.[1];
+                                          if (!p) return <span className="text-slate-400">未定</span>;
+                                          const sub = match.substitutions?.[p.id];
+                                          return (
+                                            <div className="inline-flex items-center gap-1 bg-white/70 px-1.5 py-0.5 rounded-lg border border-slate-200/80">
+                                              {sub ? (
+                                                <span className="inline-flex items-center gap-1 text-[11px]">
+                                                  <span className="line-through text-slate-400 font-medium" title={`原選手：${p.name} (Lv${p.level})`}>
+                                                    {p.name}
+                                                  </span>
+                                                  <span className="font-black text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded inline-flex items-center gap-0.5 shadow-2xs">
+                                                    <span>➔ {sub.substituteName}</span>
+                                                    <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
+                                                  </span>
+                                                </span>
+                                              ) : (
+                                                <span className="font-extrabold text-slate-900 text-xs inline-flex items-center gap-1">
+                                                  <span>{p.name}</span>
+                                                  <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
+                                                    Lv{p.level ?? 0}
+                                                  </span>
+                                                </span>
+                                              )}
+                                              <button
+                                                type="button"
+                                                disabled={isDone}
+                                                onClick={() => handleOpenSubstitutionModal(match, round, p, 'B')}
+                                                title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
+                                                className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                                  isDone
+                                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                                    : sub
+                                                    ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
+                                                    : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
+                                                }`}
+                                              >
+                                                <ArrowRightLeft className="w-3 h-3" />
+                                              </button>
+                                            </div>
+                                          );
+                                        })()}
+                                      </div>
                                     </div>
                                   </div>
 
@@ -1922,6 +2309,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 {stat.tierGroupLabel}
                               </span>
                             )}
+                            {stat.hasAnySubstitution && (
+                              <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
+                                <span>⚠️ 含代打場次</span>
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-slate-500 flex items-center gap-2 flex-wrap">
                             <span>{stat.player.gender === 'male' ? '男士' : '女士'}</span>
@@ -2063,6 +2455,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   <div className="text-slate-500 text-[11px]">
                                     ⚔️ 對手：{h.opponentsText}
                                   </div>
+                                  {h.substituteNote && (
+                                    <div className="text-[10px] font-bold text-amber-800 bg-amber-100/90 border border-amber-300 px-2 py-0.5 rounded-md inline-flex items-center gap-1 shadow-2xs mt-1">
+                                      <span>⚠️ {h.substituteNote}</span>
+                                    </div>
+                                  )}
                                 </div>
 
                                 <div className="text-right shrink-0">
@@ -2433,11 +2830,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               場地 {m.courtNumber} ({m.tierGroupLabel || ''})
                             </span>
                             <div className="font-semibold text-slate-900">
-                              {m.teamA?.[0]?.name || '未定'} & {m.teamA?.[1]?.name || '未定'}
+                              {(() => {
+                                const p0 = m.teamA?.[0];
+                                const p1 = m.teamA?.[1];
+                                const sub0 = p0 ? m.substitutions?.[p0.id] : undefined;
+                                const sub1 = p1 ? m.substitutions?.[p1.id] : undefined;
+                                const name0 = p0 ? (sub0 ? `${p0.name}(${sub0.substituteName}代)` : p0.name) : '未定';
+                                const name1 = p1 ? (sub1 ? `${p1.name}(${sub1.substituteName}代)` : p1.name) : '未定';
+                                return `${name0} & ${name1}`;
+                              })()}
                             </div>
                             <div className="text-slate-400 font-bold text-center">VS</div>
                             <div className="font-semibold text-slate-900">
-                              {m.teamB?.[0]?.name || '未定'} & {m.teamB?.[1]?.name || '未定'}
+                              {(() => {
+                                const p0 = m.teamB?.[0];
+                                const p1 = m.teamB?.[1];
+                                const sub0 = p0 ? m.substitutions?.[p0.id] : undefined;
+                                const sub1 = p1 ? m.substitutions?.[p1.id] : undefined;
+                                const name0 = p0 ? (sub0 ? `${p0.name}(${sub0.substituteName}代)` : p0.name) : '未定';
+                                const name1 = p1 ? (sub1 ? `${p1.name}(${sub1.substituteName}代)` : p1.name) : '未定';
+                                return `${name0} & ${name1}`;
+                              })()}
                             </div>
                           </div>
                         );
@@ -2713,6 +3126,386 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               >
                 關閉
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Scheme A: Player Substitution / Injury Replacement Modal */}
+      {subModalState.isOpen && subModalState.match && subModalState.round && subModalState.targetPlayer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-amber-200 overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-amber-600 to-amber-700 p-4 sm:p-5 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                  <ArrowRightLeft className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-black text-base leading-tight">
+                    選手臨時代打 / 傷退更換
+                  </h3>
+                  <p className="text-xs text-amber-100 font-medium">
+                    第 {subModalState.round.roundNumber} 輪 · 場地 {subModalState.match.courtNumber} · {subModalState.match.tierGroupLabel}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseSubstitutionModal}
+                className="w-8 h-8 rounded-lg bg-white/10 hover:bg-white/20 text-white flex items-center justify-center transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs">
+              {/* Target Player Info Banner */}
+              <div className="bg-amber-50/80 border border-amber-200 rounded-xl p-3 flex items-center justify-between">
+                <div>
+                  <span className="text-[11px] font-bold text-amber-800 uppercase block">欲替換選手</span>
+                  <div className="font-black text-slate-900 text-sm mt-0.5">
+                    {subModalState.targetPlayer.name}{' '}
+                    <span className="font-mono text-xs font-bold text-amber-800 bg-amber-200/80 px-1.5 py-0.2 rounded">
+                      Lv{subModalState.targetPlayer.level}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <span className="text-[11px] text-slate-500 font-medium">所屬位置</span>
+                  <div className="font-bold text-slate-800">隊伍 {subModalState.targetTeam}</div>
+                </div>
+              </div>
+
+              {/* If existing sub is already active */}
+              {subModalState.existingSub && (
+                <div className="bg-white border-2 border-amber-400 rounded-xl p-3 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-bold text-amber-900 flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-amber-500" />
+                      此場目前已由代打出賽中：
+                    </span>
+                    <span className="px-1.5 py-0.2 text-[10px] font-bold bg-amber-100 text-amber-900 rounded">
+                      {subModalState.existingSub.scope === 'remaining_matches' ? '連同後續場次' : '僅限此場'}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="font-black text-sm text-amber-900">
+                      ➔ {subModalState.existingSub.substituteName} (Lv{subModalState.existingSub.substituteLevel})
+                    </div>
+                    <span className="text-[11px] text-slate-500">
+                      原因：{subModalState.existingSub.reason || '代打'}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Source Selector Tabs */}
+              <div className="space-y-2">
+                <label className="block font-bold text-slate-800">
+                  選擇代打人員來源：
+                </label>
+                <div className="grid grid-cols-3 gap-1.5 bg-slate-100 p-1 rounded-xl text-center">
+                  <button
+                    type="button"
+                    onClick={() => setSubSourceType('resting')}
+                    className={`py-2 px-2 rounded-lg font-bold transition-all cursor-pointer text-xs ${
+                      subSourceType === 'resting'
+                        ? 'bg-white text-amber-900 shadow-xs ring-1 ring-amber-300'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    🌟 輪休隊員
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubSourceType('roster')}
+                    className={`py-2 px-2 rounded-lg font-bold transition-all cursor-pointer text-xs ${
+                      subSourceType === 'roster'
+                        ? 'bg-white text-amber-900 shadow-xs ring-1 ring-amber-300'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    👥 選手名單
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSubSourceType('custom')}
+                    className={`py-2 px-2 rounded-lg font-bold transition-all cursor-pointer text-xs ${
+                      subSourceType === 'custom'
+                        ? 'bg-white text-amber-900 shadow-xs ring-1 ring-amber-300'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    ✏️ 現場外援
+                  </button>
+                </div>
+              </div>
+
+              {/* Content 1: Resting Players (Recommended) */}
+              {subSourceType === 'resting' && (
+                <div className="space-y-2 border border-slate-200 rounded-xl p-3 bg-slate-50/60">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-700">
+                      第 {subModalState.round.roundNumber} 輪輪休選手（實力相近首選）：
+                    </span>
+                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded">
+                      推薦首選
+                    </span>
+                  </div>
+
+                  {subModalState.round.restingPlayers && subModalState.round.restingPlayers.length > 0 ? (
+                    <div className="space-y-2 pt-1">
+                      {subModalState.round.restingPlayers.map((rp) => {
+                        const rpTier = getTierByLevel(rp.level);
+                        return (
+                          <div
+                            key={rp.id}
+                            className="bg-white p-3 rounded-xl border border-slate-200 flex items-center justify-between hover:border-amber-400 transition-all shadow-2xs"
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-sm text-slate-900">{rp.name}</span>
+                              <span className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${rpTier.colorClass.badge}`}>
+                                Lv {rp.level} {rpTier.name}
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleApplySubstitution({
+                                  subName: rp.name,
+                                  subLevel: rp.level,
+                                  subId: rp.id,
+                                  isResting: true,
+                                  reason: subReason,
+                                  scope: subScope,
+                                })
+                              }
+                              className="px-3 py-1.5 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-lg transition-colors cursor-pointer shadow-xs inline-flex items-center gap-1"
+                            >
+                              <UserCheck className="w-3.5 h-3.5" />
+                              <span>指派此人代打</span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <p className="text-slate-400 py-3 text-center">本輪無輪休選手，請由名單挑選或手動輸入現場外援代打。</p>
+                  )}
+                </div>
+              )}
+
+              {/* Content 2: Registered Roster Dropdown */}
+              {subSourceType === 'roster' && (
+                <div className="space-y-3 border border-slate-200 rounded-xl p-3 bg-slate-50/60">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      請選取已報名選手：
+                    </label>
+                    <select
+                      value={subSelectedRosterId}
+                      onChange={(e) => setSubSelectedRosterId(e.target.value)}
+                      className="w-full p-2.5 border border-slate-300 rounded-xl bg-white text-xs"
+                    >
+                      <option value="">-- 請選擇選手 --</option>
+                      {players
+                        .filter((p) => {
+                          const currentMatch = subModalState.match;
+                          if (!currentMatch) return true;
+                          const inMatch =
+                            (currentMatch.teamA && (currentMatch.teamA[0]?.id === p.id || currentMatch.teamA[1]?.id === p.id)) ||
+                            (currentMatch.teamB && (currentMatch.teamB[0]?.id === p.id || currentMatch.teamB[1]?.id === p.id));
+                          return !inMatch;
+                        })
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            [Lv {p.level} {p.tierName || ''}] {p.name} ({p.gender === 'male' ? '男' : '女'})
+                          </option>
+                        ))}
+                    </select>
+                  </div>
+
+                  {subSelectedRosterId && (() => {
+                    const selP = players.find((p) => p.id === subSelectedRosterId);
+                    if (!selP) return null;
+                    return (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleApplySubstitution({
+                            subName: selP.name,
+                            subLevel: selP.level,
+                            subId: selP.id,
+                            isResting: false,
+                            reason: subReason,
+                            scope: subScope,
+                          })
+                        }
+                        className="w-full py-2 px-4 bg-amber-600 hover:bg-amber-700 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-xs flex items-center justify-center gap-1.5"
+                      >
+                        <UserCheck className="w-3.5 h-3.5" />
+                        <span>指派【{selP.name}】代打</span>
+                      </button>
+                    );
+                  })()}
+                </div>
+              )}
+
+              {/* Content 3: Custom / External Player Input */}
+              {subSourceType === 'custom' && (
+                <div className="space-y-3 border border-slate-200 rounded-xl p-3 bg-slate-50/60">
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      代打人員姓名 / 暱稱 <span className="text-rose-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      value={subCustomName}
+                      onChange={(e) => setSubCustomName(e.target.value)}
+                      placeholder="例如：林教練(代) 或 陳大哥"
+                      className="w-full p-2.5 border border-slate-300 rounded-xl bg-white text-xs"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block font-bold text-slate-700 mb-1">
+                      戰力等級 (0~18級)
+                    </label>
+                    <select
+                      value={subCustomLevel}
+                      onChange={(e) => setSubCustomLevel(Number(e.target.value))}
+                      className="w-full p-2.5 border border-slate-300 rounded-xl bg-white text-xs"
+                    >
+                      {Array.from({ length: 19 }, (_, i) => i).map((lvl) => {
+                        const tier = getTierByLevel(lvl);
+                        return (
+                          <option key={lvl} value={lvl}>
+                            Lv {lvl} ({lvl === 0 ? '超新手' : tier.name})
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={!subCustomName.trim()}
+                    onClick={() =>
+                      handleApplySubstitution({
+                        subName: subCustomName.trim(),
+                        subLevel: subCustomLevel,
+                        isResting: false,
+                        reason: subReason,
+                        scope: subScope,
+                      })
+                    }
+                    className="w-full py-2 px-4 bg-amber-600 hover:bg-amber-700 disabled:opacity-40 text-white font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-xs flex items-center justify-center gap-1.5"
+                  >
+                    <UserCheck className="w-3.5 h-3.5" />
+                    <span>指派【{subCustomName || '外援'}】代打</span>
+                  </button>
+                </div>
+              )}
+
+              {/* Common Option: Reason */}
+              <div className="space-y-1.5">
+                <label className="block font-bold text-slate-700">代打原因：</label>
+                <div className="flex flex-wrap gap-2">
+                  {['身體受傷 / 拉傷', '體力透支 / 抽筋', '臨時有事離場', '友誼代打'].map((r) => (
+                    <button
+                      key={r}
+                      type="button"
+                      onClick={() => setSubReason(r)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold border transition-all cursor-pointer ${
+                        subReason === r
+                          ? 'bg-amber-100 border-amber-400 text-amber-900 shadow-2xs'
+                          : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      {r}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Common Option: Scope */}
+              <div className="space-y-1.5">
+                <label className="block font-bold text-slate-700">更換套用範圍：</label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <label
+                    className={`p-2.5 rounded-xl border flex items-start gap-2 cursor-pointer transition-all ${
+                      subScope === 'single_match'
+                        ? 'bg-amber-50/90 border-amber-400 ring-1 ring-amber-300'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="subScope"
+                      checked={subScope === 'single_match'}
+                      onChange={() => setSubScope('single_match')}
+                      className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                    />
+                    <div>
+                      <span className="font-bold text-slate-900 block">僅替換此場比賽</span>
+                      <span className="text-[10px] text-slate-500 block leading-tight mt-0.5">
+                        第 {subModalState.round.roundNumber} 輪，其餘後續場次暫不變動
+                      </span>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`p-2.5 rounded-xl border flex items-start gap-2 cursor-pointer transition-all ${
+                      subScope === 'remaining_matches'
+                        ? 'bg-amber-50/90 border-amber-400 ring-1 ring-amber-300'
+                        : 'bg-white border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="subScope"
+                      checked={subScope === 'remaining_matches'}
+                      onChange={() => setSubScope('remaining_matches')}
+                      className="mt-0.5 text-amber-600 focus:ring-amber-500"
+                    />
+                    <div>
+                      <span className="font-bold text-slate-900 block">一併替換後續未賽場次</span>
+                      <span className="text-[10px] text-slate-500 block leading-tight mt-0.5">
+                        若傷勢較重無法再打，自動全面代換後續場次
+                      </span>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-50 p-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2">
+              {subModalState.existingSub ? (
+                <button
+                  type="button"
+                  onClick={() => handleRemoveSubstitution(false)}
+                  className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-xl transition-colors cursor-pointer"
+                >
+                  ❌ 復原為原選手（取消代打）
+                </button>
+              ) : (
+                <div className="hidden sm:block text-[11px] text-slate-500">
+                  ※ 代打設定完成後將自動同步至雲端，選手出賽卡片與大螢幕將即時更新。
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={handleCloseSubstitutionModal}
+                  className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+                >
+                  關閉取消
+                </button>
+              </div>
             </div>
           </div>
         </div>

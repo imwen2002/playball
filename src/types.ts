@@ -67,6 +67,18 @@ export interface TournamentGroup {
   singlePlayers?: PlayerSubmission[];
 }
 
+export interface MatchSubstitutionRecord {
+  originalPlayerId: string;
+  originalPlayerName: string;
+  substitutePlayerId?: string; // If chosen from registered players
+  substituteName: string;
+  substituteLevel: number;
+  isRestingPlayer?: boolean;
+  reason?: string; // e.g. '受傷 / 傷退', '臨時離場', '其他代打'
+  scope?: 'single_match' | 'remaining_matches';
+  timestamp: string;
+}
+
 export interface CourtMatch {
   id: string;
   roundNumber: number;
@@ -77,6 +89,7 @@ export interface CourtMatch {
   scoreA?: number;
   scoreB?: number;
   status?: 'pending' | 'playing' | 'completed';
+  substitutions?: Record<string, MatchSubstitutionRecord>; // key: originalPlayerId
 }
 
 export interface ScheduleRound {
