@@ -1,10 +1,10 @@
 import React from 'react';
 import { UserAccount } from '../types';
-import { Award, FileSpreadsheet, Sparkles, Lock } from 'lucide-react';
+import { Award, FileSpreadsheet, Sparkles, Lock, CalendarDays } from 'lucide-react';
 
 interface HeaderProps {
-  currentTab: 'assessment' | 'admin' | 'chart';
-  onSelectTab: (tab: 'assessment' | 'admin' | 'chart') => void;
+  currentTab: 'assessment' | 'admin' | 'chart' | 'schedule';
+  onSelectTab: (tab: 'assessment' | 'admin' | 'chart' | 'schedule') => void;
   user: UserAccount | null;
   onLogout: () => void;
   onOpenDeployGuide?: () => void;
@@ -85,6 +85,18 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
+              onClick={() => onSelectTab('schedule')}
+              className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer ${
+                currentTab === 'schedule'
+                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
+              }`}
+            >
+              <CalendarDays className="w-3.5 h-3.5 text-emerald-600" />
+              <span>大會即時賽程</span>
+            </button>
+
+            <button
               onClick={() => onSelectTab('admin')}
               className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer ${
                 currentTab === 'admin'
@@ -147,6 +159,18 @@ export const Header: React.FC<HeaderProps> = ({
           >
             <Sparkles className="w-3 h-3" />
             <span>自評表</span>
+          </button>
+
+          <button
+            onClick={() => onSelectTab('schedule')}
+            className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg text-center whitespace-nowrap transition-colors flex items-center justify-center gap-1 cursor-pointer ${
+              currentTab === 'schedule'
+                ? 'bg-emerald-600 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <CalendarDays className="w-3 h-3" />
+            <span>賽程表</span>
           </button>
 
           <button

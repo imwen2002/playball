@@ -23,8 +23,19 @@ const STORAGE_USER_KEY = 'badminton_tournament_user_v2';
 const SESSION_ADMIN_UNLOCKED_KEY = 'badminton_admin_unlocked_v1';
 
 export default function App() {
-  // Navigation tabs: 'assessment' | 'admin' | 'chart'
-  const [currentTab, setCurrentTab] = useState<'assessment' | 'admin' | 'chart'>('assessment');
+  // Navigation tabs: 'assessment' | 'admin' | 'chart' | 'schedule'
+  const [currentTab, setCurrentTab] = useState<'assessment' | 'admin' | 'chart' | 'schedule'>(() => {
+    try {
+      const params = new URLSearchParams(window.location.search);
+      const tabParam = params.get('tab');
+      if (tabParam === 'schedule') return 'schedule';
+      if (tabParam === 'chart') return 'chart';
+      if (tabParam === 'admin') return 'admin';
+    } catch {
+      // ignore
+    }
+    return 'assessment';
+  });
 
   // Modals
   const [isChartOpen, setIsChartOpen] = useState(false);
@@ -137,7 +148,7 @@ export default function App() {
   };
 
   // Tab switching with password gate
-  const handleSelectTab = (tab: 'assessment' | 'admin' | 'chart') => {
+  const handleSelectTab = (tab: 'assessment' | 'admin' | 'chart' | 'schedule') => {
     if (tab === 'chart') {
       setIsChartOpen(true);
       return;
@@ -194,6 +205,15 @@ export default function App() {
             onSubmitPlayer={handleSubmitPlayer}
             existingSubmission={currentUserSubmission}
             onViewOfficialChart={() => setIsChartOpen(true)}
+          />
+        )}
+
+        {currentTab === 'schedule' && (
+          <AdminDashboard
+            players={players}
+            onUpdatePlayers={setPlayers}
+            onViewOfficialChart={() => setIsChartOpen(true)}
+            isPublicView={true}
           />
         )}
 

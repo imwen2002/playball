@@ -62,6 +62,7 @@ interface AdminDashboardProps {
   onSavePlayer?: (player: PlayerSubmission) => Promise<void>;
   onBatchAddPlayers?: (players: PlayerSubmission[]) => Promise<void>;
   onBatchDeleteSamplePlayers?: (samples: PlayerSubmission[]) => Promise<void>;
+  isPublicView?: boolean;
 }
 
 export const AdminDashboard: React.FC<AdminDashboardProps> = ({
@@ -73,6 +74,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onSavePlayer,
   onBatchAddPlayers,
   onBatchDeleteSamplePlayers,
+  isPublicView = false,
 }) => {
   // Navigation inside Admin: 'schedule' (3-Court) | 'scores' (Prize leaderboard) | 'roster' | 'print'
   const [activeAdminTab, setActiveAdminTab] = useState<'schedule' | 'scores' | 'roster' | 'print'>('schedule');
@@ -698,54 +700,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // State for sharing schedule
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
-  // Share schedule to company group (LINE/Teams/Slack/etc.)
+  // Share schedule webpage link directly (so LINE/Teams/Slack renders the rich webpage preview card)
   const handleShareSchedule = async () => {
-    if (!courtSchedule || !Array.isArray(courtSchedule.rounds) || courtSchedule.rounds.length === 0) {
-      alert('尚未排定賽程，請先至「3 場地循環排程表」點選「一鍵排定 3 場地賽程」再進行分享。');
-      return;
+    // Build direct URL to the schedule webpage
+    let shareUrl = window.location.href;
+    try {
+      const url = new URL(window.location.href);
+      url.searchParams.set('tab', 'schedule');
+      shareUrl = url.toString();
+    } catch {
+      // fallback
     }
 
-    const currentUrl = window.location.href;
-    let text = `🏸 【義鼎杯羽球錦標賽 · 賽程對戰公告】\n`;
-    text += `參賽總選手：共 ${players.length} 人 · 3 場地循環賽\n`;
-    text += `即時查閱連結：${currentUrl}\n\n`;
-
-    courtSchedule.rounds.forEach((round) => {
-      if (!round) return;
-      text += `━━━━━━━━━━━━━━━\n📍 第 ${round.roundNumber} 輪次對戰\n`;
-      (round.matches || []).forEach((m) => {
-        if (!m) return;
-        const cleanGroup = formatCleanTierGroupLabel(m.tierGroupLabel);
-        const pA0 = m.teamA?.[0];
-        const pA1 = m.teamA?.[1];
-        const subA0 = pA0 ? m.substitutions?.[pA0.id] : undefined;
-        const subA1 = pA1 ? m.substitutions?.[pA1.id] : undefined;
-        const nameA0 = pA0 ? (subA0 ? `${pA0.name}(${subA0.substituteName}代)` : pA0.name) : '未定';
-        const nameA1 = pA1 ? (subA1 ? `${pA1.name}(${subA1.substituteName}代)` : pA1.name) : '未定';
-
-        const pB0 = m.teamB?.[0];
-        const pB1 = m.teamB?.[1];
-        const subB0 = pB0 ? m.substitutions?.[pB0.id] : undefined;
-        const subB1 = pB1 ? m.substitutions?.[pB1.id] : undefined;
-        const nameB0 = pB0 ? (subB0 ? `${pB0.name}(${subB0.substituteName}代)` : pB0.name) : '未定';
-        const nameB1 = pB1 ? (subB1 ? `${pB1.name}(${subB1.substituteName}代)` : pB1.name) : '未定';
-
-        text += `場地 ${m.courtNumber} (${cleanGroup})\n${nameA0} & ${nameA1}  VS  ${nameB0} & ${nameB1}\n`;
-      });
-      if (round.restingPlayers && round.restingPlayers.length > 0) {
-        text += `💤 本輪輪休：${round.restingPlayers.map((p) => p?.name || '').filter(Boolean).join('、')}\n`;
-      }
-      text += '\n';
-    });
+    const pageTitle = '🏸 義鼎杯羽球錦標賽 · 即時賽程與戰績公告表';
 
     if (navigator.share) {
       try {
         await navigator.share({
-          title: '🏸 義鼎杯羽球錦標賽 · 賽程對戰公告',
-          text: text,
-          url: currentUrl,
+          title: pageTitle,
+          url: shareUrl,
         });
-        setShareFeedback('✓ 已成功分享！');
+        setShareFeedback('✓ 已成功分享賽程網頁！');
         setTimeout(() => setShareFeedback(null), 3000);
         return;
       } catch (err: any) {
@@ -754,11 +729,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
 
     try {
-      await navigator.clipboard.writeText(text);
-      setShareFeedback('✓ 已複製賽程與網址！可貼至群組');
+      await navigator.clipboard.writeText(shareUrl);
+      setShareFeedback('✓ 已複製賽程網頁連結！可貼至公司群組');
       setTimeout(() => setShareFeedback(null), 3500);
     } catch {
-      alert('已為您準備好賽程分享內容！\n' + currentUrl);
+      prompt('請複製以下賽程網頁連結分享至公司群組：', shareUrl);
     }
   };
 
@@ -1015,15 +990,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 border-b border-slate-100 pb-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
-              <span className="px-2.5 py-0.5 rounded-md bg-slate-900 text-white text-[11px] font-bold">
-                賽事主辦人後台
+              <span className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold ${
+                isPublicView ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white'
+              }`}>
+                {isPublicView ? '大會即時賽程公告' : '賽事主辦人後台'}
               </span>
               <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-medium">
-                3 場地循環 · 每組 5 人 · 每人 4 場 0 重複搭檔
+                {isPublicView ? '公開查閱模式 · 3 場地循環賽 · 自動連線即時更新' : '3 場地循環 · 每組 5 人 · 每人 4 場 0 重複搭檔'}
               </span>
             </div>
             <h1 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight">
-              羽球錦標賽名單與賽程中控台
+              {isPublicView ? '羽球錦標賽 · 即時賽程與對戰公告' : '羽球錦標賽名單與賽程中控台'}
             </h1>
           </div>
 
@@ -1031,13 +1008,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="flex items-center gap-2 flex-wrap shrink-0 self-start md:self-auto">
             <div className="px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/90 text-emerald-900 text-xs font-semibold flex items-center gap-1.5 shadow-2xs">
               <span className={`w-2 h-2 rounded-full ${isCloudSyncing ? 'bg-amber-500 animate-ping' : 'bg-emerald-500 animate-pulse'}`} />
-              <span>{isCloudSyncing ? '雲端同步存檔中...' : '雲端自動存檔'}</span>
+              <span>{isCloudSyncing ? '雲端同步中...' : '雲端連線即時同步'}</span>
               <span className="text-[11px] text-emerald-700 font-normal">
-                {lastCloudSyncTime ? `(即時同步 ${lastCloudSyncTime})` : '(跨裝置已連線)'}
+                {lastCloudSyncTime ? `(${lastCloudSyncTime})` : '(跨裝置已連線)'}
               </span>
             </div>
 
-            {onLockAdmin && (
+            {!isPublicView && onLockAdmin && (
               <button
                 type="button"
                 onClick={onLockAdmin}
@@ -1184,81 +1161,83 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       </div>
 
-      {/* Central Action Toolbar: Moved from top header */}
-      <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
-            <Sliders className="w-4 h-4 text-emerald-600" />
-            <span>賽事操作中樞：</span>
-          </span>
-          {isCloudSyncing ? (
-            <span className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold animate-pulse">
-              <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
-              <span>雲端同步寫入中...</span>
+      {/* Central Action Toolbar: visible only in Admin Mode */}
+      {!isPublicView && (
+        <div className="bg-white rounded-2xl p-3 sm:p-4 border border-slate-200 shadow-xs flex flex-wrap items-center justify-between gap-2.5">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+              <Sliders className="w-4 h-4 text-emerald-600" />
+              <span>賽事操作中樞：</span>
             </span>
-          ) : lastCloudSyncTime ? (
-            <span className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold shadow-2xs">
-              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-              <span>☁️ 雲端已即時自動存檔 ({lastCloudSyncTime}) · 手機電腦全同步</span>
-            </span>
-          ) : (
-            <span className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-medium">
-              <span>☁️ 雲端即時連線中</span>
-            </span>
-          )}
-        </div>
+            {isCloudSyncing ? (
+              <span className="flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200 rounded-lg text-xs font-bold animate-pulse">
+                <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-600" />
+                <span>雲端同步寫入中...</span>
+              </span>
+            ) : lastCloudSyncTime ? (
+              <span className="flex items-center gap-1.5 px-2.5 py-1 bg-emerald-50 text-emerald-800 border border-emerald-200 rounded-lg text-xs font-bold shadow-2xs">
+                <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                <span>☁️ 雲端已即時自動存檔 ({lastCloudSyncTime}) · 手機電腦全同步</span>
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-medium">
+                <span>☁️ 雲端即時連線中</span>
+              </span>
+            )}
+          </div>
 
-        <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-          <button
-            type="button"
-            onClick={handleGenerateCourtSchedule}
-            className="px-3.5 sm:px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-          >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>一鍵排定 3 場地賽程</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={handlePreloadSampleData}
-            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
-          >
-            <Users className="w-3.5 h-3.5 text-slate-500" />
-            <span>載入 15 位示範名單 (3組5人)</span>
-          </button>
-
-          {samplePlayersInRoster.length > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             <button
               type="button"
-              onClick={handleDeleteSampleData}
-              title="一鍵清除所有預設的測試示範選手名單"
-              className="px-3 py-2 text-xs font-semibold rounded-xl border border-rose-300 text-rose-700 bg-rose-50 hover:bg-rose-100 transition-all flex items-center gap-1 cursor-pointer shadow-xs"
+              onClick={handleGenerateCourtSchedule}
+              className="px-3.5 sm:px-4 py-2 text-xs font-bold text-white bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
             >
-              <Trash2 className="w-3.5 h-3.5 text-rose-600" />
-              <span>一鍵刪除示範名單 ({samplePlayersInRoster.length})</span>
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>一鍵排定 3 場地賽程</span>
             </button>
-          )}
 
-          <button
-            type="button"
-            onClick={() => setIsAddPlayerOpen(true)}
-            className="px-3 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            <span>手動新增選手</span>
-          </button>
+            <button
+              type="button"
+              onClick={handlePreloadSampleData}
+              className="px-3 py-2 text-xs font-semibold text-slate-700 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              <Users className="w-3.5 h-3.5 text-slate-500" />
+              <span>載入 15 位示範名單 (3組5人)</span>
+            </button>
 
-          <button
-            type="button"
-            onClick={() => exportPlayersToCSV(players)}
-            disabled={players.length === 0}
-            className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors flex items-center gap-1 disabled:opacity-50 cursor-pointer"
-          >
-            <Download className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">匯出選手名單 CSV</span>
-          </button>
+            {samplePlayersInRoster.length > 0 && (
+              <button
+                type="button"
+                onClick={handleDeleteSampleData}
+                title="一鍵清除所有預設的測試示範選手名單"
+                className="px-3 py-2 text-xs font-semibold rounded-xl border border-rose-300 text-rose-700 bg-rose-50 hover:bg-rose-100 transition-all flex items-center gap-1 cursor-pointer shadow-xs"
+              >
+                <Trash2 className="w-3.5 h-3.5 text-rose-600" />
+                <span>一鍵刪除示範名單 ({samplePlayersInRoster.length})</span>
+              </button>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setIsAddPlayerOpen(true)}
+              className="px-3 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 rounded-xl shadow-xs transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              <span>手動新增選手</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => exportPlayersToCSV(players)}
+              disabled={players.length === 0}
+              className="px-3 py-2 text-xs font-semibold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-colors flex items-center gap-1 disabled:opacity-50 cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">匯出選手名單 CSV</span>
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Admin Functional Navigation Tabs */}
       <div className="flex items-center gap-1 sm:gap-2 border-b border-slate-200 overflow-x-auto no-scrollbar pb-1">
@@ -1296,20 +1275,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </span>
         </button>
 
-        <button
-          onClick={() => setActiveAdminTab('roster')}
-          className={`py-2 px-3 sm:px-4 text-xs sm:text-sm font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-            activeAdminTab === 'roster'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
-        >
-          <Users className="w-4 h-4" />
-          <span>選手名單與等級微調</span>
-          <span className="px-1.5 py-0.2 text-[10px] bg-slate-700 text-slate-100 rounded-full font-black">
-            {players.length}
-          </span>
-        </button>
+        {!isPublicView && (
+          <button
+            onClick={() => setActiveAdminTab('roster')}
+            className={`py-2 px-3 sm:px-4 text-xs sm:text-sm font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeAdminTab === 'roster'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Users className="w-4 h-4" />
+            <span>選手名單與等級微調</span>
+            <span className="px-1.5 py-0.2 text-[10px] bg-slate-700 text-slate-100 rounded-full font-black">
+              {players.length}
+            </span>
+          </button>
+        )}
 
         <button
           onClick={() => setActiveAdminTab('print')}
@@ -1718,39 +1699,51 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </div>
                                   </div>
 
-                                  {/* Score 0 / 1 Selector */}
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <button
-                                      type="button"
-                                      disabled={isDone}
-                                      onClick={() => handleUpdateMatchScore(match.id, 'A', 0)}
-                                      title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
-                                      className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                        isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                      } ${
-                                        scoreA === 0
-                                          ? 'bg-slate-700 text-white shadow-xs'
-                                          : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
-                                      }`}
-                                    >
-                                      0
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={isDone}
-                                      onClick={() => handleUpdateMatchScore(match.id, 'A', 1)}
-                                      title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
-                                      className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                        isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                      } ${
+                                  {/* Score Display (Public View) vs Selector (Admin Mode) */}
+                                  {isPublicView ? (
+                                    <div className="shrink-0">
+                                      <span className={`px-2.5 py-1 text-xs font-black rounded-lg ${
                                         scoreA === 1
-                                          ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400'
-                                          : 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
-                                      }`}
-                                    >
-                                      1
-                                    </button>
-                                  </div>
+                                          ? 'bg-emerald-600 text-white shadow-xs'
+                                          : 'bg-white/80 border border-slate-200 text-slate-500 font-bold'
+                                      }`}>
+                                        {scoreA !== undefined ? `${scoreA} 分` : '-'}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        disabled={isDone}
+                                        onClick={() => handleUpdateMatchScore(match.id, 'A', 0)}
+                                        title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
+                                        className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                          isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                        } ${
+                                          scoreA === 0
+                                            ? 'bg-slate-700 text-white shadow-xs'
+                                            : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
+                                        }`}
+                                      >
+                                        0
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={isDone}
+                                        onClick={() => handleUpdateMatchScore(match.id, 'A', 1)}
+                                        title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
+                                        className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                          isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                        } ${
+                                          scoreA === 1
+                                            ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400'
+                                            : 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                                        }`}
+                                      >
+                                        1
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
 
                                 <div className="text-center">
@@ -1807,21 +1800,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                   </span>
                                                 </span>
                                               )}
-                                              <button
-                                                type="button"
-                                                disabled={isDone}
-                                                onClick={() => handleOpenSubstitutionModal(match, round, p, 'B')}
-                                                title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
-                                                className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                                                  isDone
-                                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                                    : sub
-                                                    ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
-                                                    : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
-                                                }`}
-                                              >
-                                                <ArrowRightLeft className="w-3 h-3" />
-                                              </button>
+                                              {!isPublicView && (
+                                                <button
+                                                  type="button"
+                                                  disabled={isDone}
+                                                  onClick={() => handleOpenSubstitutionModal(match, round, p, 'B')}
+                                                  title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
+                                                  className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                                    isDone
+                                                      ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                                      : sub
+                                                      ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
+                                                      : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
+                                                  }`}
+                                                >
+                                                  <ArrowRightLeft className="w-3 h-3" />
+                                                </button>
+                                              )}
                                             </div>
                                           );
                                         })()}
@@ -1853,21 +1848,23 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                                   </span>
                                                 </span>
                                               )}
-                                              <button
-                                                type="button"
-                                                disabled={isDone}
-                                                onClick={() => handleOpenSubstitutionModal(match, round, p, 'B')}
-                                                title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
-                                                className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                                                  isDone
-                                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                                    : sub
-                                                    ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
-                                                    : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
-                                                }`}
-                                              >
-                                                <ArrowRightLeft className="w-3 h-3" />
-                                              </button>
+                                              {!isPublicView && (
+                                                <button
+                                                  type="button"
+                                                  disabled={isDone}
+                                                  onClick={() => handleOpenSubstitutionModal(match, round, p, 'B')}
+                                                  title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
+                                                  className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                                    isDone
+                                                      ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                                      : sub
+                                                      ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
+                                                      : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
+                                                  }`}
+                                                >
+                                                  <ArrowRightLeft className="w-3 h-3" />
+                                                </button>
+                                              )}
                                             </div>
                                           );
                                         })()}
@@ -1875,71 +1872,103 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </div>
                                   </div>
 
-                                  {/* Score 0 / 1 Selector */}
-                                  <div className="flex items-center gap-1 shrink-0">
-                                    <button
-                                      type="button"
-                                      disabled={isDone}
-                                      onClick={() => handleUpdateMatchScore(match.id, 'B', 0)}
-                                      title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
-                                      className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                        isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                      } ${
-                                        scoreB === 0
-                                          ? 'bg-slate-700 text-white shadow-xs'
-                                          : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
-                                      }`}
-                                    >
-                                      0
-                                    </button>
-                                    <button
-                                      type="button"
-                                      disabled={isDone}
-                                      onClick={() => handleUpdateMatchScore(match.id, 'B', 1)}
-                                      title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
-                                      className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                        isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                      } ${
+                                  {/* Score Display (Public View) vs Selector (Admin Mode) */}
+                                  {isPublicView ? (
+                                    <div className="shrink-0">
+                                      <span className={`px-2.5 py-1 text-xs font-black rounded-lg ${
                                         scoreB === 1
-                                          ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-400'
-                                          : 'bg-white border border-blue-300 text-blue-700 hover:bg-blue-50'
-                                      }`}
-                                    >
-                                      1
-                                    </button>
-                                  </div>
+                                          ? 'bg-blue-600 text-white shadow-xs'
+                                          : 'bg-white/80 border border-slate-200 text-slate-500 font-bold'
+                                      }`}>
+                                        {scoreB !== undefined ? `${scoreB} 分` : '-'}
+                                      </span>
+                                    </div>
+                                  ) : (
+                                    <div className="flex items-center gap-1 shrink-0">
+                                      <button
+                                        type="button"
+                                        disabled={isDone}
+                                        onClick={() => handleUpdateMatchScore(match.id, 'B', 0)}
+                                        title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
+                                        className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                          isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                        } ${
+                                          scoreB === 0
+                                            ? 'bg-slate-700 text-white shadow-xs'
+                                            : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
+                                        }`}
+                                      >
+                                        0
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={isDone}
+                                        onClick={() => handleUpdateMatchScore(match.id, 'B', 1)}
+                                        title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
+                                        className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                          isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                        } ${
+                                          scoreB === 1
+                                            ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-400'
+                                            : 'bg-white border border-blue-300 text-blue-700 hover:bg-blue-50'
+                                        }`}
+                                      >
+                                        1
+                                      </button>
+                                    </div>
+                                  )}
                                 </div>
                               </div>
 
-                              {/* Prominent Match Completion Toggle Button */}
+                              {/* Prominent Match Completion Toggle Button (Admin) / Status Badge (Public) */}
                               <div className="pt-2 border-t border-slate-200/80">
-                                <button
-                                  type="button"
-                                  onClick={() => handleToggleMatchComplete(match.id)}
-                                  className={`w-full py-2 px-3 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
-                                    isZeroScoreDone
-                                      ? 'bg-amber-600 hover:bg-amber-700 text-white ring-2 ring-amber-400'
-                                      : isDone
-                                      ? 'bg-emerald-600 hover:bg-emerald-700 text-white ring-2 ring-emerald-400'
-                                      : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
-                                  }`}
-                                >
-                                  {isZeroScoreDone ? (
-                                    <>
-                                      <Lock className="w-3.5 h-3.5 text-amber-200" />
-                                      <span>⚠️ 完賽 (雙方0分) · 比分已鎖定 (點擊解鎖修改)</span>
-                                    </>
-                                  ) : isDone ? (
-                                    <>
-                                      <Lock className="w-3.5 h-3.5 text-emerald-200" />
-                                      <span>✓ 本場已完賽 · 比分已鎖定 (點擊解鎖修改分數)</span>
-                                    </>
-                                  ) : (
-                                    <>
-                                      <span>標記此場完賽</span>
-                                    </>
-                                  )}
-                                </button>
+                                {isPublicView ? (
+                                  <div className={`w-full py-1.5 px-3 text-xs font-bold rounded-xl flex items-center justify-center gap-1.5 ${
+                                    isDone
+                                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                      : 'bg-slate-50 text-slate-500 border border-slate-200'
+                                  }`}>
+                                    {isDone ? (
+                                      <>
+                                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                                        <span>✓ 本場已完賽</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                                        <span>待賽中 / 進行中</span>
+                                      </>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleMatchComplete(match.id)}
+                                    className={`w-full py-2 px-3 text-xs font-black rounded-xl transition-all flex items-center justify-center gap-1.5 cursor-pointer shadow-xs ${
+                                      isZeroScoreDone
+                                        ? 'bg-amber-600 hover:bg-amber-700 text-white ring-2 ring-amber-400'
+                                        : isDone
+                                        ? 'bg-emerald-600 hover:bg-emerald-700 text-white ring-2 ring-emerald-400'
+                                        : 'bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-300'
+                                    }`}
+                                  >
+                                    {isZeroScoreDone ? (
+                                      <>
+                                        <Lock className="w-3.5 h-3.5 text-amber-200" />
+                                        <span>⚠️ 完賽 (雙方0分) · 比分已鎖定 (點擊解鎖修改)</span>
+                                      </>
+                                    ) : isDone ? (
+                                      <>
+                                        <Lock className="w-3.5 h-3.5 text-emerald-200" />
+                                        <span>✓ 本場已完賽 · 比分已鎖定 (點擊解鎖修改分數)</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <span>標記此場完賽</span>
+                                      </>
+                                    )}
+                                  </button>
+                                )}
                               </div>
                             </div>
                           );
@@ -1964,7 +1993,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-4">
                 {(() => {
                   const activePlayerIds = new Set((players || []).map((p) => p.id));
                   const activeEmails = new Set((players || []).map((p) => (p.email || '').toLowerCase()));
@@ -1973,15 +2002,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     (p) => sampleEmails.has((p.email || '').toLowerCase()) || p.id.startsWith('sample-')
                   );
 
-                  const validPlayerStats = Object.values(courtSchedule.playerStats || {}).filter((stat) => {
-                    if (!stat || !stat.player) return false;
+                  // Map of active playerId -> player stats
+                  const playerStatsMap = new Map<string, typeof courtSchedule.playerStats[string]>();
+                  Object.values(courtSchedule.playerStats || {}).forEach((stat) => {
+                    if (!stat || !stat.player) return;
                     const pEmail = (stat.player.email || '').toLowerCase();
                     const isSample = stat.player.id.startsWith('sample-') || sampleEmails.has(pEmail);
-                    if (isSample && !isSampleInRoster) return false;
-                    return activePlayerIds.has(stat.player.id) || activeEmails.has(pEmail);
+                    if (isSample && !isSampleInRoster) return;
+                    if (activePlayerIds.has(stat.player.id) || activeEmails.has(pEmail)) {
+                      playerStatsMap.set(stat.player.id, stat);
+                    }
                   });
 
-                  if (validPlayerStats.length === 0) {
+                  if (playerStatsMap.size === 0) {
                     return (
                       <div className="col-span-full py-12 text-center text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-300 space-y-1">
                         <div className="font-bold text-slate-700 text-sm">目前無出賽檢核資料</div>
@@ -1992,74 +2025,157 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     );
                   }
 
-                  return validPlayerStats.map((stat) => {
-                    const isExpanded = expandedPlayerStats === stat.player.id;
-                    const tier = getTierByLevel(stat.player.level ?? 0);
+                  // 1. Sort divisions strictly from lowest tier level to highest tier level
+                  const sortedDivisions = courtSchedule.tierDivisions && courtSchedule.tierDivisions.length > 0
+                    ? [...courtSchedule.tierDivisions].sort((a, b) => {
+                        const minA = Math.min(...(a.players || []).map((p) => p.level ?? 0));
+                        const minB = Math.min(...(b.players || []).map((p) => p.level ?? 0));
+                        return minA - minB;
+                      })
+                    : [];
 
-                    return (
-                      <div
-                        key={stat.player.id}
-                        className="border border-slate-200 rounded-xl p-3 sm:p-4 space-y-2 hover:border-slate-300 transition-all bg-slate-50/50"
-                      >
-                        <div
-                          onClick={() =>
-                            setExpandedPlayerStats(isExpanded ? null : stat.player.id)
-                          }
-                          className="flex items-center justify-between cursor-pointer"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="font-extrabold text-sm text-slate-900">
-                              {stat.player.name}
-                            </span>
-                            <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${tier.colorClass.badge}`}>
-                              Lv {stat.player.level} {tier.name}
+                  const handledPlayerIds = new Set<string>();
+
+                  // Build ordered groups
+                  const divisionGroups = sortedDivisions.map((div, divIdx) => {
+                    // Grab valid stats for players belonging to this division, sorted by level ascending
+                    const divStats = (div.players || [])
+                      .map((p) => {
+                        const s = playerStatsMap.get(p.id) || Array.from(playerStatsMap.values()).find(
+                          (item) => (item.player.email || '').toLowerCase() === (p.email || '').toLowerCase()
+                        );
+                        return s;
+                      })
+                      .filter((s): s is NonNullable<typeof s> => Boolean(s))
+                      .sort((a, b) => (a.player.level ?? 0) - (b.player.level ?? 0));
+
+                    divStats.forEach((s) => handledPlayerIds.add(s.player.id));
+
+                    const minLvl = divStats.length > 0 ? Math.min(...divStats.map((s) => s.player.level ?? 0)) : 0;
+                    const maxLvl = divStats.length > 0 ? Math.max(...divStats.map((s) => s.player.level ?? 0)) : 0;
+                    const cleanLabel = formatCleanTierGroupLabel(div.tierLabel) || `第 ${divIdx + 1} 循環組`;
+
+                    return {
+                      divisionIndex: divIdx,
+                      label: cleanLabel,
+                      minLvl,
+                      maxLvl,
+                      stats: divStats,
+                    };
+                  }).filter((g) => g.stats.length > 0);
+
+                  // Any active player not in division definitions fallback:
+                  const unassigned = Array.from(playerStatsMap.values())
+                    .filter((s) => !handledPlayerIds.has(s.player.id))
+                    .sort((a, b) => (a.player.level ?? 0) - (b.player.level ?? 0));
+
+                  if (unassigned.length > 0) {
+                    divisionGroups.push({
+                      divisionIndex: divisionGroups.length,
+                      label: '其餘選手分組',
+                      minLvl: Math.min(...unassigned.map((s) => s.player.level ?? 0)),
+                      maxLvl: Math.max(...unassigned.map((s) => s.player.level ?? 0)),
+                      stats: unassigned,
+                    });
+                  }
+
+                  return (
+                    <div className="col-span-full space-y-6">
+                      {divisionGroups.map((group, gIdx) => (
+                        <div key={group.divisionIndex} className="space-y-3">
+                          {/* Division Group Header (Lowest tier to Highest tier) */}
+                          <div className="bg-slate-100/90 border border-slate-200 rounded-xl px-3.5 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 shadow-2xs">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="w-5 h-5 rounded-md bg-emerald-600 text-white text-[11px] font-black flex items-center justify-center shrink-0">
+                                {gIdx + 1}
+                              </span>
+                              <span className="font-extrabold text-sm text-slate-900 tracking-tight">
+                                {group.label}
+                              </span>
+                              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-white text-emerald-800 border border-emerald-200">
+                                {group.minLvl === group.maxLvl ? `Lv ${group.minLvl}` : `Lv ${group.minLvl} ~ Lv ${group.maxLvl}`}
+                              </span>
+                            </div>
+                            <span className="text-[11px] text-slate-500 font-medium">
+                              本組共 {group.stats.length} 位選手 · 依戰力等級由低到高排序
                             </span>
                           </div>
 
-                          <div className="flex items-center gap-1.5 sm:gap-2">
-                            <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
-                              已排 {stat.totalMatches} / 4 場
-                            </span>
-                            <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-50 border border-teal-200 text-teal-800">
-                              4搭檔 0重複
-                            </span>
-                            {isExpanded ? (
-                              <ChevronUp className="w-4 h-4 text-slate-400" />
-                            ) : (
-                              <ChevronDown className="w-4 h-4 text-slate-400" />
-                            )}
+                          {/* Player Cards in this Division */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                            {group.stats.map((stat) => {
+                              const isExpanded = expandedPlayerStats === stat.player.id;
+                              const tier = getTierByLevel(stat.player.level ?? 0);
+
+                              return (
+                                <div
+                                  key={stat.player.id}
+                                  className="border border-slate-200 rounded-xl p-3 sm:p-4 space-y-2 hover:border-slate-300 transition-all bg-slate-50/50"
+                                >
+                                  <div
+                                    onClick={() =>
+                                      setExpandedPlayerStats(isExpanded ? null : stat.player.id)
+                                    }
+                                    className="flex items-center justify-between cursor-pointer"
+                                  >
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-extrabold text-sm text-slate-900">
+                                        {stat.player.name}
+                                      </span>
+                                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${tier.colorClass.badge}`}>
+                                        Lv {stat.player.level} {tier.name}
+                                      </span>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5 sm:gap-2">
+                                      <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-emerald-100 text-emerald-800">
+                                        已排 {stat.totalMatches} / 4 場
+                                      </span>
+                                      <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[10px] font-bold bg-teal-50 border border-teal-200 text-teal-800">
+                                        4搭檔 0重複
+                                      </span>
+                                      {isExpanded ? (
+                                        <ChevronUp className="w-4 h-4 text-slate-400" />
+                                      ) : (
+                                        <ChevronDown className="w-4 h-4 text-slate-400" />
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Expanded Match List */}
+                                  {isExpanded && (
+                                    <div className="pt-2 border-t border-slate-200 space-y-1.5 text-xs animate-in fade-in">
+                                      {(stat.matches || []).map((m, idx) => (
+                                        <div
+                                          key={m.matchId || `match-${idx}`}
+                                          className="p-2 bg-white rounded-lg border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px]"
+                                        >
+                                          <div className="flex items-center gap-1.5">
+                                            <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.2 rounded">
+                                              第 {idx + 1} 場
+                                            </span>
+                                            <span className="font-bold text-emerald-700">
+                                              第 {m.roundNumber || 0} 輪 · 場地 {m.courtNumber || 0}
+                                            </span>
+                                          </div>
+                                          <div className="text-slate-600">
+                                            搭檔：<strong className="text-slate-900">{m.partner?.name || '未定'}</strong> vs{' '}
+                                            <span className="text-slate-700">
+                                              {m.opponents?.[0]?.name || '未定'} & {m.opponents?.[1]?.name || '未定'}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
                         </div>
-
-                        {/* Expanded Match List */}
-                        {isExpanded && (
-                          <div className="pt-2 border-t border-slate-200 space-y-1.5 text-xs animate-in fade-in">
-                            {(stat.matches || []).map((m, idx) => (
-                              <div
-                                key={m.matchId || `match-${idx}`}
-                                className="p-2 bg-white rounded-lg border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px]"
-                              >
-                                <div className="flex items-center gap-1.5">
-                                  <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.2 rounded">
-                                    第 {idx + 1} 場
-                                  </span>
-                                  <span className="font-bold text-emerald-700">
-                                    第 {m.roundNumber || 0} 輪 · 場地 {m.courtNumber || 0}
-                                  </span>
-                                </div>
-                                <div className="text-slate-600">
-                                  搭檔：<strong className="text-slate-900">{m.partner?.name || '未定'}</strong> vs{' '}
-                                  <span className="text-slate-700">
-                                    {m.opponents?.[0]?.name || '未定'} & {m.opponents?.[1]?.name || '未定'}
-                                  </span>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  });
+                      ))}
+                    </div>
+                  );
                 })()}
               </div>
             </div>
