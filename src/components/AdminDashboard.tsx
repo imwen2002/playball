@@ -700,9 +700,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // State for sharing schedule
   const [shareFeedback, setShareFeedback] = useState<string | null>(null);
 
-  // Share schedule webpage link directly (so LINE/Teams/Slack renders the rich webpage preview card)
-  const handleShareSchedule = async () => {
-    // Build direct URL to the schedule webpage
+  // Share schedule webpage by opening in a new tab for direct copying and distribution
+  const handleShareSchedule = () => {
     let shareUrl = window.location.href;
     try {
       const url = new URL(window.location.href);
@@ -712,34 +711,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       // fallback
     }
 
-    const pageTitle = '🏸 義鼎杯羽球錦標賽 · 即時賽程與戰績公告表';
-
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: pageTitle,
-          url: shareUrl,
-        });
-        setShareFeedback('✓ 已成功分享賽程網頁！');
-        setTimeout(() => setShareFeedback(null), 3000);
-        return;
-      } catch (err: any) {
-        if (err?.name === 'AbortError') return;
-      }
-    }
-
-    try {
-      await navigator.clipboard.writeText(shareUrl);
-      setShareFeedback('✓ 已複製賽程網頁連結！可貼至公司群組');
-      setTimeout(() => setShareFeedback(null), 3500);
-    } catch {
-      prompt('請複製以下賽程網頁連結分享至公司群組：', shareUrl);
-    }
+    // Open in a new browser tab as requested by user
+    window.open(shareUrl, '_blank');
+    setShareFeedback('✓ 已在新分頁開啟公開賽程公告頁！可直接複製該頁網址分享');
+    setTimeout(() => setShareFeedback(null), 4000);
   };
 
   // Expanded player ID in Score Leaderboard for inspecting match breakdown
   const [expandedScorePlayerId, setExpandedScorePlayerId] = useState<string | null>(null);
-  const [scoreSortMetric, setScoreSortMetric] = useState<'points' | 'diff' | 'wins' | 'level'>('points');
+  const [scoreSortMetric, setScoreSortMetric] = useState<'points' | 'diff' | 'wins'>('points');
   const [scoreSearchQuery, setScoreSearchQuery] = useState('');
 
   // Real-time calculation of individual player score statistics for tournament prize payout
@@ -893,7 +873,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             courtNumber: m.courtNumber || 0,
             partnerName,
             partnerLevel,
-            opponentsText: `${opp0Name}(Lv${opp0Level}) & ${opp1Name}(Lv${opp1Level})`,
+            opponentsText: `${opp0Name} & ${opp1Name}`,
             myTeamScore: myScore,
             oppTeamScore: oppScore,
             result,
@@ -927,7 +907,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         if (b.wins !== a.wins) return b.wins - a.wins;
         return b.totalPointsWon - a.totalPointsWon;
       }
-      return b.player.level - a.player.level;
+      return b.totalPointsWon - a.totalPointsWon || b.pointDifferential - a.pointDifferential;
     });
   }, [players, courtSchedule, matchScores, scoreSortMetric]);
 
@@ -993,26 +973,62 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <span className={`px-2.5 py-0.5 rounded-md text-[11px] font-bold ${
                 isPublicView ? 'bg-emerald-600 text-white' : 'bg-slate-900 text-white'
               }`}>
-                {isPublicView ? '大會即時賽程公告' : '賽事主辦人後台'}
+                {isPublicView ? '🏸 大會即時賽程與戰績公告' : '賽事主辦人後台'}
               </span>
               <span className="text-[11px] text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md font-medium">
-                {isPublicView ? '公開查閱模式 · 3 場地循環賽 · 自動連線即時更新' : '3 場地循環 · 每組 5 人 · 每人 4 場 0 重複搭檔'}
+                {isPublicView ? '公開查閱模式 · 賽程分組與個人獎金公告榜 · 即時連線同步' : '3 場地循環 · 每組 5 人 · 每人 4 場 0 重複搭檔'}
               </span>
             </div>
             <h1 className="text-lg sm:text-2xl font-black text-slate-900 tracking-tight">
-              {isPublicView ? '羽球錦標賽 · 即時賽程與對戰公告' : '羽球錦標賽名單與賽程中控台'}
+              {isPublicView ? '義鼎杯羽球錦標賽 · 即時賽程與戰績公告' : '羽球錦標賽名單與賽程中控台'}
             </h1>
+            {isPublicView && (
+              <p className="text-xs text-slate-500">
+                本頁面提供選手與同仁即時查看【賽程分組公告表】與【選手個人勝場得分與獎金組別公告榜】，比分完賽即時連線更新。
+              </p>
+            )}
           </div>
 
-          {/* Top Right Action: Cloud Sync Status & Lock Admin */}
+          {/* Top Right Action: Cloud Sync Status & Public Share Button / Lock Admin */}
           <div className="flex items-center gap-2 flex-wrap shrink-0 self-start md:self-auto">
-            <div className="px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/90 text-emerald-900 text-xs font-semibold flex items-center gap-1.5 shadow-2xs">
-              <span className={`w-2 h-2 rounded-full ${isCloudSyncing ? 'bg-amber-500 animate-ping' : 'bg-emerald-500 animate-pulse'}`} />
-              <span>{isCloudSyncing ? '雲端同步中...' : '雲端連線即時同步'}</span>
-              <span className="text-[11px] text-emerald-700 font-normal">
-                {lastCloudSyncTime ? `(${lastCloudSyncTime})` : '(跨裝置已連線)'}
-              </span>
-            </div>
+            {isPublicView ? (
+              <>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const url = window.location.href;
+                    try {
+                      await navigator.clipboard.writeText(url);
+                      setShareFeedback('✓ 已複製本頁公開網址！可直接貼至 LINE / Teams 群組');
+                    } catch {
+                      prompt('請複製以下賽程網頁網址分享給同事：', url);
+                    }
+                    setTimeout(() => setShareFeedback(null), 3500);
+                  }}
+                  className="px-3.5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+                >
+                  <Copy className="w-3.5 h-3.5" />
+                  <span>{shareFeedback || '複製本頁分享網址 (傳至群組)'}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-3 py-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>列印</span>
+                </button>
+              </>
+            ) : (
+              <div className="px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/90 text-emerald-900 text-xs font-semibold flex items-center gap-1.5 shadow-2xs">
+                <span className={`w-2 h-2 rounded-full ${isCloudSyncing ? 'bg-amber-500 animate-ping' : 'bg-emerald-500 animate-pulse'}`} />
+                <span>{isCloudSyncing ? '雲端同步中...' : '雲端連線即時同步'}</span>
+                <span className="text-[11px] text-emerald-700 font-normal">
+                  {lastCloudSyncTime ? `(${lastCloudSyncTime})` : '(跨裝置已連線)'}
+                </span>
+              </div>
+            )}
 
             {!isPublicView && onLockAdmin && (
               <button
@@ -1250,7 +1266,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }`}
         >
           <CalendarDays className="w-4 h-4" />
-          <span>3 場地循環排程表</span>
+          <span>{isPublicView ? '賽程分組公告表' : '3 場地循環排程表'}</span>
           {courtSchedule && (
             <span className="px-1.5 py-0.2 text-[10px] bg-white text-emerald-800 rounded-full font-black">
               {courtSchedule.rounds.length}輪
@@ -1267,7 +1283,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }`}
         >
           <Trophy className="w-4 h-4" />
-          <span>每位選手統計得分區</span>
+          <span>{isPublicView ? '選手個人勝場得分與獎金組別公告榜' : '每位選手統計得分區'}</span>
           <span className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
             activeAdminTab === 'scores' ? 'bg-white text-amber-800' : 'bg-amber-100 text-amber-800'
           }`}>
@@ -1301,7 +1317,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }`}
         >
           <Printer className="w-4 h-4" />
-          <span>列印公布排版</span>
+          <span>{isPublicView ? '列印公布版型' : '列印公布排版'}</span>
         </button>
       </div>
 
@@ -1356,13 +1372,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
+              {!isPublicView && (
+                <button
+                  type="button"
+                  onClick={handleGenerateCourtSchedule}
+                  className="px-3.5 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>重新一鍵排定 (AI抽籤)</span>
+                </button>
+              )}
+
               <button
                 type="button"
-                onClick={handleGenerateCourtSchedule}
-                className="px-3.5 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                onClick={handleShareSchedule}
+                className="px-3.5 py-1.5 text-xs font-bold text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-300 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
+                title="在新分頁開啟公開賽程公告頁，可複製網址傳至公司群組"
               >
-                <RefreshCw className="w-3.5 h-3.5 text-emerald-600" />
-                <span>重新一鍵排定 (AI抽籤)</span>
+                <Share2 className="w-3.5 h-3.5 text-blue-600" />
+                <span>{shareFeedback ? '已開啟新分頁！' : '分享賽程表 (另開公開分頁)'}</span>
               </button>
 
               <button
@@ -1371,7 +1399,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 className="px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-all flex items-center gap-1 cursor-pointer"
               >
                 {hasCopiedText ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{hasCopiedText ? '已複製賽程！' : '複製對戰文字表'}</span>
+                <span>{hasCopiedText ? '已複製賽程！' : '複製文字表'}</span>
               </button>
 
               {/* View Switcher: byRound vs byPlayer */}
@@ -2092,12 +2120,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <span className="font-extrabold text-sm text-slate-900 tracking-tight">
                                 {group.label}
                               </span>
-                              <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-white text-emerald-800 border border-emerald-200">
-                                {group.minLvl === group.maxLvl ? `Lv ${group.minLvl}` : `Lv ${group.minLvl} ~ Lv ${group.maxLvl}`}
-                              </span>
                             </div>
                             <span className="text-[11px] text-slate-500 font-medium">
-                              本組共 {group.stats.length} 位選手 · 依戰力等級由低到高排序
+                              本組共 {group.stats.length} 位選手
                             </span>
                           </div>
 
@@ -2123,7 +2148,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         {stat.player.name}
                                       </span>
                                       <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${tier.colorClass.badge}`}>
-                                        Lv {stat.player.level} {tier.name}
+                                        {tier.name}
                                       </span>
                                     </div>
 
@@ -2339,7 +2364,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 { id: 'points', label: '個人總得分 (獎金依據)' },
                 { id: 'diff', label: '淨勝分差' },
                 { id: 'wins', label: '勝場數' },
-                { id: 'level', label: '戰力級數' },
               ].map((s) => (
                 <button
                   key={s.id}
@@ -2533,19 +2557,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <span className="font-black text-base text-slate-900">
                               {stat.player.name}
                             </span>
-                            <span className="px-2 py-0.5 rounded-md font-mono text-xs font-black bg-slate-100 text-slate-800">
-                              Lv {stat.player.level}
-                            </span>
                             <span
                               className={`px-2 py-0.5 rounded text-[10px] font-bold ${tier.colorClass.badge}`}
                             >
                               {tier.name}
                             </span>
-                            {stat.tierGroupLabel && (
-                              <span className="text-[11px] font-medium text-slate-500 bg-slate-50 px-2 py-0.5 rounded border border-slate-200">
-                                {stat.tierGroupLabel}
-                              </span>
-                            )}
                             {stat.hasAnySubstitution && (
                               <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
                                 <span>⚠️ 含代打場次</span>
@@ -2686,8 +2702,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </span>
                                   </div>
                                   <div className="text-slate-700">
-                                    🤝 隊友搭檔：<span className="font-bold text-slate-900">{h.partnerName}</span>{' '}
-                                    <span className="text-[10px] font-mono text-slate-500">(Lv{h.partnerLevel})</span>
+                                    🤝 隊友搭檔：<span className="font-bold text-slate-900">{h.partnerName}</span>
                                   </div>
                                   <div className="text-slate-500 text-[11px]">
                                     ⚔️ 對手：{h.opponentsText}
@@ -3017,7 +3032,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 className="px-3.5 py-2 text-xs font-bold text-slate-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
               >
                 <Share2 className="w-4 h-4 text-emerald-600" />
-                <span>{shareFeedback || '分享賽程表 (Share)'}</span>
+                <span>{shareFeedback ? '已開啟新分頁！' : '分享賽程表 (另開公開分頁)'}</span>
               </button>
               <button
                 type="button"
@@ -3093,13 +3108,24 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                         })();
 
                         return (
-                          <div key={m.id} className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-center space-y-1.5">
-                            <div className="font-bold text-slate-800 text-[11px]">
+                          <div key={m.id} className="p-4 bg-slate-50 rounded-xl border border-slate-300 text-center space-y-2">
+                            <div
+                              className="font-bold text-slate-800 text-[18px] print:text-[13.5pt] leading-normal"
+                              style={{ fontSize: '13.5pt' }}
+                            >
                               場地 {m.courtNumber}{cleanGroup ? ` (${cleanGroup})` : ''}
                             </div>
-                            <div className="font-semibold text-slate-900 text-xs flex items-center justify-center gap-2 flex-wrap">
+                            <div
+                              className="font-extrabold text-slate-900 text-[19px] print:text-[14pt] flex items-center justify-center gap-2.5 flex-wrap leading-normal"
+                              style={{ fontSize: '14pt' }}
+                            >
                               <span>{teamAStr}</span>
-                              <span className="font-black text-slate-400">VS</span>
+                              <span
+                                className="font-black text-slate-400 text-[15px] px-1 print:text-[11.5pt]"
+                                style={{ fontSize: '11.5pt' }}
+                              >
+                                VS
+                              </span>
                               <span>{teamBStr}</span>
                             </div>
                           </div>
