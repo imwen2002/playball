@@ -992,34 +992,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* Top Right Action: Cloud Sync Status & Public Share Button / Lock Admin */}
           <div className="flex items-center gap-2 flex-wrap shrink-0 self-start md:self-auto">
             {isPublicView ? (
-              <>
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const url = window.location.href;
-                    try {
-                      await navigator.clipboard.writeText(url);
-                      setShareFeedback('✓ 已複製本頁公開網址！可直接貼至 LINE / Teams 群組');
-                    } catch {
-                      prompt('請複製以下賽程網頁網址分享給同事：', url);
-                    }
-                    setTimeout(() => setShareFeedback(null), 3500);
-                  }}
-                  className="px-3.5 py-2 text-xs font-bold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
-                >
-                  <Copy className="w-3.5 h-3.5" />
-                  <span>{shareFeedback || '複製本頁分享網址 (傳至群組)'}</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => window.print()}
-                  className="px-3 py-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
-                >
-                  <Printer className="w-3.5 h-3.5" />
-                  <span>列印</span>
-                </button>
-              </>
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="px-3 py-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
+              >
+                <Printer className="w-3.5 h-3.5" />
+                <span>列印</span>
+              </button>
             ) : (
               <div className="px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/90 text-emerald-900 text-xs font-semibold flex items-center gap-1.5 shadow-2xs">
                 <span className={`w-2 h-2 rounded-full ${isCloudSyncing ? 'bg-amber-500 animate-ping' : 'bg-emerald-500 animate-pulse'}`} />
@@ -1115,15 +1095,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </span>
           </div>
 
-          <div className="p-3 sm:p-4 bg-slate-50 rounded-xl border border-slate-200/80">
-            <span className="text-[11px] sm:text-xs text-slate-500 font-medium">平均戰力分級</span>
-            <div className="text-xl sm:text-2xl font-black text-emerald-700 mt-0.5 tabular-nums">
-              Lv {stats.avgLevel || 0}
+          {isPublicView ? (
+            <div className="p-3 sm:p-4 bg-slate-50 rounded-xl border border-slate-200/80">
+              <span className="text-[11px] sm:text-xs text-slate-500 font-medium">循環賽事組別</span>
+              <div className="text-xl sm:text-2xl font-black text-emerald-700 mt-0.5 tabular-nums">
+                {courtSchedule?.tierDivisions?.length || 0} <span className="text-xs font-normal text-slate-500">組</span>
+              </div>
+              <span className="text-[10px] text-emerald-600 mt-0.5 block truncate">
+                每組 5 位選手循環制
+              </span>
             </div>
-            <span className="text-[10px] text-emerald-600 mt-0.5 block truncate">
-              {getTierByLevel(Math.round(stats.avgLevel)).name}
-            </span>
-          </div>
+          ) : (
+            <div className="p-3 sm:p-4 bg-slate-50 rounded-xl border border-slate-200/80">
+              <span className="text-[11px] sm:text-xs text-slate-500 font-medium">平均戰力分級</span>
+              <div className="text-xl sm:text-2xl font-black text-emerald-700 mt-0.5 tabular-nums">
+                Lv {stats.avgLevel || 0}
+              </div>
+              <span className="text-[10px] text-emerald-600 mt-0.5 block truncate">
+                {getTierByLevel(Math.round(stats.avgLevel)).name}
+              </span>
+            </div>
+          )}
 
           <div className="p-3 sm:p-4 bg-slate-50 rounded-xl border border-slate-200/80">
             <span className="text-[11px] sm:text-xs text-slate-500 font-medium">排定循環總場次</span>
@@ -1148,33 +1140,35 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
 
         {/* Tier Distribution Mini Bar */}
-        <div className="space-y-1 pt-1">
-          <div className="flex items-center justify-between text-[11px] text-slate-600">
-            <span className="font-semibold">選手分級分佈 (0~18級)：</span>
-            <button
-              onClick={onViewOfficialChart}
-              className="text-emerald-700 hover:underline flex items-center gap-1 font-medium cursor-pointer"
-            >
-              <Award className="w-3 h-3" />
-              對照制度說明
-            </button>
+        {!isPublicView && (
+          <div className="space-y-1 pt-1">
+            <div className="flex items-center justify-between text-[11px] text-slate-600">
+              <span className="font-semibold">選手分級分佈 (0~18級)：</span>
+              <button
+                onClick={onViewOfficialChart}
+                className="text-emerald-700 hover:underline flex items-center gap-1 font-medium cursor-pointer"
+              >
+                <Award className="w-3 h-3" />
+                對照制度說明
+              </button>
+            </div>
+            <div className="flex items-center h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
+              {BADMINTON_TIERS.map((tier) => {
+                const count = stats.tierCounts[tier.name] || 0;
+                const pct = stats.total > 0 ? (count / stats.total) * 100 : 0;
+                if (pct === 0) return null;
+                return (
+                  <div
+                    key={tier.tierId}
+                    style={{ width: `${pct}%` }}
+                    title={`${tier.name}: ${count}人 (${pct.toFixed(0)}%)`}
+                    className={`h-full transition-all ${tier.colorClass.badge}`}
+                  />
+                );
+              })}
+            </div>
           </div>
-          <div className="flex items-center h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
-            {BADMINTON_TIERS.map((tier) => {
-              const count = stats.tierCounts[tier.name] || 0;
-              const pct = stats.total > 0 ? (count / stats.total) * 100 : 0;
-              if (pct === 0) return null;
-              return (
-                <div
-                  key={tier.tierId}
-                  style={{ width: `${pct}%` }}
-                  title={`${tier.name}: ${count}人 (${pct.toFixed(0)}%)`}
-                  className={`h-full transition-all ${tier.colorClass.badge}`}
-                />
-              );
-            })}
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Central Action Toolbar: visible only in Admin Mode */}
@@ -1364,7 +1358,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       key={i}
                       className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-800 text-[11px] font-medium"
                     >
-                      {div.tierLabel}（{div.players.map((p) => p.name).join('、')}）
+                      {formatCleanTierGroupLabel(div.tierLabel)}（{div.players.map((p) => p.name).join('、')}）
                     </span>
                   ))}
                 </div>
@@ -1382,25 +1376,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   <span>重新一鍵排定 (AI抽籤)</span>
                 </button>
               )}
-
-              <button
-                type="button"
-                onClick={handleShareSchedule}
-                className="px-3.5 py-1.5 text-xs font-bold text-blue-800 bg-blue-50 hover:bg-blue-100 border border-blue-300 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                title="在新分頁開啟公開賽程公告頁，可複製網址傳至公司群組"
-              >
-                <Share2 className="w-3.5 h-3.5 text-blue-600" />
-                <span>{shareFeedback ? '已開啟新分頁！' : '分享賽程表 (另開公開分頁)'}</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={handleCopySchedule}
-                className="px-3.5 py-1.5 text-xs font-bold text-slate-700 bg-white hover:bg-slate-50 border border-slate-300 rounded-xl transition-all flex items-center gap-1 cursor-pointer"
-              >
-                {hasCopiedText ? <Check className="w-3.5 h-3.5 text-emerald-600" /> : <Copy className="w-3.5 h-3.5" />}
-                <span>{hasCopiedText ? '已複製賽程！' : '複製文字表'}</span>
-              </button>
 
               {/* View Switcher: byRound vs byPlayer */}
               <div className="bg-slate-100 p-0.5 rounded-xl flex items-center text-xs">
@@ -1604,8 +1579,8 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </span>
                                   )}
                                 </div>
-                                <span className="text-[11px] text-slate-500 font-medium truncate max-w-[140px]">
-                                  {match.tierGroupLabel}
+                                <span className="text-[11px] text-slate-500 font-medium truncate max-w-[160px]">
+                                  {formatCleanTierGroupLabel(match.tierGroupLabel)}
                                 </span>
                               </div>
 
@@ -1613,7 +1588,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               <div className="space-y-2">
                                 {/* Team A */}
                                 <div
-                                  className={`p-2.5 rounded-xl flex items-center justify-between transition-all ${
+                                  className={`p-3 rounded-xl flex flex-col space-y-2 transition-all ${
                                     isDone
                                       ? scoreA === 1
                                         ? 'bg-emerald-100 border-2 border-emerald-500 shadow-2xs'
@@ -1621,9 +1596,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                       : 'bg-emerald-50/70 border border-emerald-200/80'
                                   }`}
                                 >
-                                  <div className="space-y-0.5 truncate pr-2">
+                                  {/* Team Header Strip: Team A label & Score */}
+                                  <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-1.5">
-                                      <span className="text-[10px] font-black text-emerald-800 uppercase block">
+                                      <span className="text-[11px] font-black text-emerald-800 uppercase block">
                                         隊伍 A
                                       </span>
                                       {isDone && scoreA === 1 && (
@@ -1632,157 +1608,163 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         </span>
                                       )}
                                     </div>
-                                    <div className="space-y-1">
-                                      <div className="flex items-center gap-1.5 flex-wrap">
-                                        {/* Team A Player 1 */}
-                                        {(() => {
-                                          const p = match.teamA?.[0];
-                                          if (!p) return <span className="text-slate-400">未定</span>;
-                                          const sub = match.substitutions?.[p.id];
-                                          return (
-                                            <div className="inline-flex items-center gap-1 bg-white/70 px-1.5 py-0.5 rounded-lg border border-slate-200/80">
-                                              {sub ? (
-                                                <span className="inline-flex items-center gap-1 text-[11px]">
-                                                  <span className="line-through text-slate-400 font-medium" title={`原選手：${p.name} (Lv${p.level})`}>
-                                                    {p.name}
-                                                  </span>
-                                                  <span className="font-black text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded inline-flex items-center gap-0.5 shadow-2xs">
-                                                    <span>➔ {sub.substituteName}</span>
-                                                    <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
-                                                  </span>
-                                                </span>
-                                              ) : (
-                                                <span className="font-extrabold text-slate-900 text-xs inline-flex items-center gap-1">
-                                                  <span>{p.name}</span>
-                                                  <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
-                                                    Lv{p.level ?? 0}
-                                                  </span>
-                                                </span>
-                                              )}
-                                              <button
-                                                type="button"
-                                                disabled={isDone}
-                                                onClick={() => handleOpenSubstitutionModal(match, round, p, 'A')}
-                                                title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
-                                                className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                                                  isDone
-                                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                                    : sub
-                                                    ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
-                                                    : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
-                                                }`}
-                                              >
-                                                <ArrowRightLeft className="w-3 h-3" />
-                                              </button>
-                                            </div>
-                                          );
-                                        })()}
 
-                                        <span className="text-slate-400 font-bold text-xs">&</span>
-
-                                        {/* Team A Player 2 */}
-                                        {(() => {
-                                          const p = match.teamA?.[1];
-                                          if (!p) return <span className="text-slate-400">未定</span>;
-                                          const sub = match.substitutions?.[p.id];
-                                          return (
-                                            <div className="inline-flex items-center gap-1 bg-white/70 px-1.5 py-0.5 rounded-lg border border-slate-200/80">
-                                              {sub ? (
-                                                <span className="inline-flex items-center gap-1 text-[11px]">
-                                                  <span className="line-through text-slate-400 font-medium" title={`原選手：${p.name} (Lv${p.level})`}>
-                                                    {p.name}
-                                                  </span>
-                                                  <span className="font-black text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded inline-flex items-center gap-0.5 shadow-2xs">
-                                                    <span>➔ {sub.substituteName}</span>
-                                                    <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
-                                                  </span>
-                                                </span>
-                                              ) : (
-                                                <span className="font-extrabold text-slate-900 text-xs inline-flex items-center gap-1">
-                                                  <span>{p.name}</span>
-                                                  <span className="text-[10px] font-mono text-emerald-700 bg-emerald-100/80 px-1 rounded">
-                                                    Lv{p.level ?? 0}
-                                                  </span>
-                                                </span>
-                                              )}
-                                              <button
-                                                type="button"
-                                                disabled={isDone}
-                                                onClick={() => handleOpenSubstitutionModal(match, round, p, 'A')}
-                                                title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
-                                                className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                                                  isDone
-                                                    ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                                    : sub
-                                                    ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
-                                                    : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
-                                                }`}
-                                              >
-                                                <ArrowRightLeft className="w-3 h-3" />
-                                              </button>
-                                            </div>
-                                          );
-                                        })()}
+                                    {/* Score Display (Public View) vs Selector (Admin Mode) */}
+                                    {isPublicView ? (
+                                      <div className="shrink-0">
+                                        <span
+                                          className={`px-2.5 py-0.5 text-xs font-black rounded-lg ${
+                                            scoreA === 1
+                                              ? 'bg-emerald-600 text-white shadow-xs'
+                                              : 'bg-white/80 border border-slate-200 text-slate-500 font-bold'
+                                          }`}
+                                        >
+                                          {scoreA !== undefined ? `${scoreA} 分` : '-'}
+                                        </span>
                                       </div>
-                                    </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          disabled={isDone}
+                                          onClick={() => handleUpdateMatchScore(match.id, 'A', 0)}
+                                          title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
+                                          className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                            isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                          } ${
+                                            scoreA === 0
+                                              ? 'bg-slate-700 text-white shadow-xs'
+                                              : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
+                                          }`}
+                                        >
+                                          0
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={isDone}
+                                          onClick={() => handleUpdateMatchScore(match.id, 'A', 1)}
+                                          title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
+                                          className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                            isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                          } ${
+                                            scoreA === 1
+                                              ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400'
+                                              : 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
+                                          }`}
+                                        >
+                                          1
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
 
-                                  {/* Score Display (Public View) vs Selector (Admin Mode) */}
-                                  {isPublicView ? (
-                                    <div className="shrink-0">
-                                      <span className={`px-2.5 py-1 text-xs font-black rounded-lg ${
-                                        scoreA === 1
-                                          ? 'bg-emerald-600 text-white shadow-xs'
-                                          : 'bg-white/80 border border-slate-200 text-slate-500 font-bold'
-                                      }`}>
-                                        {scoreA !== undefined ? `${scoreA} 分` : '-'}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button
-                                        type="button"
-                                        disabled={isDone}
-                                        onClick={() => handleUpdateMatchScore(match.id, 'A', 0)}
-                                        title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
-                                        className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                          isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                        } ${
-                                          scoreA === 0
-                                            ? 'bg-slate-700 text-white shadow-xs'
-                                            : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
-                                        }`}
-                                      >
-                                        0
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={isDone}
-                                        onClick={() => handleUpdateMatchScore(match.id, 'A', 1)}
-                                        title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
-                                        className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                          isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                        } ${
-                                          scoreA === 1
-                                            ? 'bg-emerald-600 text-white shadow-xs ring-2 ring-emerald-400'
-                                            : 'bg-white border border-emerald-300 text-emerald-700 hover:bg-emerald-50'
-                                        }`}
-                                      >
-                                        1
-                                      </button>
-                                    </div>
-                                  )}
+                                  {/* Centered Players: +2pt font, zero Lv, centered */}
+                                  <div className="flex items-center justify-center gap-2 flex-wrap text-center py-0.5">
+                                    {/* Team A Player 1 */}
+                                    {(() => {
+                                      const p = match.teamA?.[0];
+                                      if (!p) return <span className="text-slate-400 font-bold">未定</span>;
+                                      const sub = match.substitutions?.[p.id];
+                                      return (
+                                        <div className="inline-flex items-center gap-1.5 bg-white/80 px-2.5 py-1 rounded-xl border border-slate-200/90 shadow-2xs">
+                                          {sub ? (
+                                            <span className="inline-flex items-center gap-1.5">
+                                              <span className="line-through text-slate-400 font-medium text-xs">
+                                                {p.name}
+                                              </span>
+                                              <span className="font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded-lg inline-flex items-center gap-1 text-[13.5px] shadow-2xs">
+                                                <span>➔ {sub.substituteName}</span>
+                                                <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
+                                              </span>
+                                            </span>
+                                          ) : (
+                                            <span
+                                              className="font-extrabold text-slate-900 text-[14.5px] tracking-tight"
+                                              style={{ fontSize: '11pt' }}
+                                            >
+                                              {p.name}
+                                            </span>
+                                          )}
+                                          {!isPublicView && (
+                                            <button
+                                              type="button"
+                                              disabled={isDone}
+                                              onClick={() => handleOpenSubstitutionModal(match, round, p, 'A')}
+                                              title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
+                                              className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                                isDone
+                                                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                                  : sub
+                                                  ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
+                                                  : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
+                                              }`}
+                                            >
+                                              <ArrowRightLeft className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
+
+                                    <span className="text-slate-400 font-black text-sm px-0.5">&</span>
+
+                                    {/* Team A Player 2 */}
+                                    {(() => {
+                                      const p = match.teamA?.[1];
+                                      if (!p) return <span className="text-slate-400 font-bold">未定</span>;
+                                      const sub = match.substitutions?.[p.id];
+                                      return (
+                                        <div className="inline-flex items-center gap-1.5 bg-white/80 px-2.5 py-1 rounded-xl border border-slate-200/90 shadow-2xs">
+                                          {sub ? (
+                                            <span className="inline-flex items-center gap-1.5">
+                                              <span className="line-through text-slate-400 font-medium text-xs">
+                                                {p.name}
+                                              </span>
+                                              <span className="font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded-lg inline-flex items-center gap-1 text-[13.5px] shadow-2xs">
+                                                <span>➔ {sub.substituteName}</span>
+                                                <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
+                                              </span>
+                                            </span>
+                                          ) : (
+                                            <span
+                                              className="font-extrabold text-slate-900 text-[14.5px] tracking-tight"
+                                              style={{ fontSize: '11pt' }}
+                                            >
+                                              {p.name}
+                                            </span>
+                                          )}
+                                          {!isPublicView && (
+                                            <button
+                                              type="button"
+                                              disabled={isDone}
+                                              onClick={() => handleOpenSubstitutionModal(match, round, p, 'A')}
+                                              title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
+                                              className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                                isDone
+                                                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                                  : sub
+                                                  ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
+                                                  : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
+                                              }`}
+                                            >
+                                              <ArrowRightLeft className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
+                                  </div>
                                 </div>
 
-                                <div className="text-center">
-                                  <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2 py-0.5 rounded-full">
+                                <div className="text-center py-0.5">
+                                  <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2.5 py-0.5 rounded-full">
                                     VS
                                   </span>
                                 </div>
 
                                 {/* Team B */}
                                 <div
-                                  className={`p-2.5 rounded-xl flex items-center justify-between transition-all ${
+                                  className={`p-3 rounded-xl flex flex-col space-y-2 transition-all ${
                                     isDone
                                       ? scoreB === 1
                                         ? 'bg-blue-100 border-2 border-blue-500 shadow-2xs'
@@ -1790,9 +1772,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                       : 'bg-blue-50/70 border border-blue-200/80'
                                   }`}
                                 >
-                                  <div className="space-y-0.5 truncate pr-2">
+                                  {/* Team Header Strip: Team B label & Score */}
+                                  <div className="flex items-center justify-between">
                                     <div className="flex items-center gap-1.5">
-                                      <span className="text-[10px] font-black text-blue-800 uppercase block">
+                                      <span className="text-[11px] font-black text-blue-800 uppercase block">
                                         隊伍 B
                                       </span>
                                       {isDone && scoreB === 1 && (
@@ -1801,150 +1784,152 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                         </span>
                                       )}
                                     </div>
-                                    <div className="space-y-1">
-                                      <div className="flex items-center gap-1.5 flex-wrap">
-                                        {/* Team B Player 1 */}
-                                        {(() => {
-                                          const p = match.teamB?.[0];
-                                          if (!p) return <span className="text-slate-400">未定</span>;
-                                          const sub = match.substitutions?.[p.id];
-                                          return (
-                                            <div className="inline-flex items-center gap-1 bg-white/70 px-1.5 py-0.5 rounded-lg border border-slate-200/80">
-                                              {sub ? (
-                                                <span className="inline-flex items-center gap-1 text-[11px]">
-                                                  <span className="line-through text-slate-400 font-medium" title={`原選手：${p.name} (Lv${p.level})`}>
-                                                    {p.name}
-                                                  </span>
-                                                  <span className="font-black text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded inline-flex items-center gap-0.5 shadow-2xs">
-                                                    <span>➔ {sub.substituteName}</span>
-                                                    <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
-                                                  </span>
-                                                </span>
-                                              ) : (
-                                                <span className="font-extrabold text-slate-900 text-xs inline-flex items-center gap-1">
-                                                  <span>{p.name}</span>
-                                                  <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
-                                                    Lv{p.level ?? 0}
-                                                  </span>
-                                                </span>
-                                              )}
-                                              {!isPublicView && (
-                                                <button
-                                                  type="button"
-                                                  disabled={isDone}
-                                                  onClick={() => handleOpenSubstitutionModal(match, round, p, 'B')}
-                                                  title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
-                                                  className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                                                    isDone
-                                                      ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                                      : sub
-                                                      ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
-                                                      : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
-                                                  }`}
-                                                >
-                                                  <ArrowRightLeft className="w-3 h-3" />
-                                                </button>
-                                              )}
-                                            </div>
-                                          );
-                                        })()}
 
-                                        <span className="text-slate-400 font-bold text-xs">&</span>
-
-                                        {/* Team B Player 2 */}
-                                        {(() => {
-                                          const p = match.teamB?.[1];
-                                          if (!p) return <span className="text-slate-400">未定</span>;
-                                          const sub = match.substitutions?.[p.id];
-                                          return (
-                                            <div className="inline-flex items-center gap-1 bg-white/70 px-1.5 py-0.5 rounded-lg border border-slate-200/80">
-                                              {sub ? (
-                                                <span className="inline-flex items-center gap-1 text-[11px]">
-                                                  <span className="line-through text-slate-400 font-medium" title={`原選手：${p.name} (Lv${p.level})`}>
-                                                    {p.name}
-                                                  </span>
-                                                  <span className="font-black text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.2 rounded inline-flex items-center gap-0.5 shadow-2xs">
-                                                    <span>➔ {sub.substituteName}</span>
-                                                    <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
-                                                  </span>
-                                                </span>
-                                              ) : (
-                                                <span className="font-extrabold text-slate-900 text-xs inline-flex items-center gap-1">
-                                                  <span>{p.name}</span>
-                                                  <span className="text-[10px] font-mono text-blue-700 bg-blue-100/80 px-1 rounded">
-                                                    Lv{p.level ?? 0}
-                                                  </span>
-                                                </span>
-                                              )}
-                                              {!isPublicView && (
-                                                <button
-                                                  type="button"
-                                                  disabled={isDone}
-                                                  onClick={() => handleOpenSubstitutionModal(match, round, p, 'B')}
-                                                  title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
-                                                  className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
-                                                    isDone
-                                                      ? 'opacity-30 cursor-not-allowed text-slate-400'
-                                                      : sub
-                                                      ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
-                                                      : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
-                                                  }`}
-                                                >
-                                                  <ArrowRightLeft className="w-3 h-3" />
-                                                </button>
-                                              )}
-                                            </div>
-                                          );
-                                        })()}
+                                    {/* Score Display (Public View) vs Selector (Admin Mode) */}
+                                    {isPublicView ? (
+                                      <div className="shrink-0">
+                                        <span
+                                          className={`px-2.5 py-0.5 text-xs font-black rounded-lg ${
+                                            scoreB === 1
+                                              ? 'bg-blue-600 text-white shadow-xs'
+                                              : 'bg-white/80 border border-slate-200 text-slate-500 font-bold'
+                                          }`}
+                                        >
+                                          {scoreB !== undefined ? `${scoreB} 分` : '-'}
+                                        </span>
                                       </div>
-                                    </div>
+                                    ) : (
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <button
+                                          type="button"
+                                          disabled={isDone}
+                                          onClick={() => handleUpdateMatchScore(match.id, 'B', 0)}
+                                          title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
+                                          className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                            isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                          } ${
+                                            scoreB === 0
+                                              ? 'bg-slate-700 text-white shadow-xs'
+                                              : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
+                                          }`}
+                                        >
+                                          0
+                                        </button>
+                                        <button
+                                          type="button"
+                                          disabled={isDone}
+                                          onClick={() => handleUpdateMatchScore(match.id, 'B', 1)}
+                                          title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
+                                          className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
+                                            isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
+                                          } ${
+                                            scoreB === 1
+                                              ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-400'
+                                              : 'bg-white border border-blue-300 text-blue-700 hover:bg-blue-50'
+                                          }`}
+                                        >
+                                          1
+                                        </button>
+                                      </div>
+                                    )}
                                   </div>
 
-                                  {/* Score Display (Public View) vs Selector (Admin Mode) */}
-                                  {isPublicView ? (
-                                    <div className="shrink-0">
-                                      <span className={`px-2.5 py-1 text-xs font-black rounded-lg ${
-                                        scoreB === 1
-                                          ? 'bg-blue-600 text-white shadow-xs'
-                                          : 'bg-white/80 border border-slate-200 text-slate-500 font-bold'
-                                      }`}>
-                                        {scoreB !== undefined ? `${scoreB} 分` : '-'}
-                                      </span>
-                                    </div>
-                                  ) : (
-                                    <div className="flex items-center gap-1 shrink-0">
-                                      <button
-                                        type="button"
-                                        disabled={isDone}
-                                        onClick={() => handleUpdateMatchScore(match.id, 'B', 0)}
-                                        title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '0 分 (未得勝場)'}
-                                        className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                          isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                        } ${
-                                          scoreB === 0
-                                            ? 'bg-slate-700 text-white shadow-xs'
-                                            : 'bg-white border border-slate-300 text-slate-400 hover:bg-slate-100'
-                                        }`}
-                                      >
-                                        0
-                                      </button>
-                                      <button
-                                        type="button"
-                                        disabled={isDone}
-                                        onClick={() => handleUpdateMatchScore(match.id, 'B', 1)}
-                                        title={isDone ? '本場已完賽，比分已鎖定 (需點擊下方解鎖才可修改)' : '1 分 (獲勝 1 場，將自動重設對方為 0 分)'}
-                                        className={`w-7 h-7 text-xs font-black rounded-lg transition-all flex items-center justify-center ${
-                                          isDone ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'
-                                        } ${
-                                          scoreB === 1
-                                            ? 'bg-blue-600 text-white shadow-xs ring-2 ring-blue-400'
-                                            : 'bg-white border border-blue-300 text-blue-700 hover:bg-blue-50'
-                                        }`}
-                                      >
-                                        1
-                                      </button>
-                                    </div>
-                                  )}
+                                  {/* Centered Players: +2pt font, zero Lv, centered */}
+                                  <div className="flex items-center justify-center gap-2 flex-wrap text-center py-0.5">
+                                    {/* Team B Player 1 */}
+                                    {(() => {
+                                      const p = match.teamB?.[0];
+                                      if (!p) return <span className="text-slate-400 font-bold">未定</span>;
+                                      const sub = match.substitutions?.[p.id];
+                                      return (
+                                        <div className="inline-flex items-center gap-1.5 bg-white/80 px-2.5 py-1 rounded-xl border border-slate-200/90 shadow-2xs">
+                                          {sub ? (
+                                            <span className="inline-flex items-center gap-1.5">
+                                              <span className="line-through text-slate-400 font-medium text-xs">
+                                                {p.name}
+                                              </span>
+                                              <span className="font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded-lg inline-flex items-center gap-1 text-[13.5px] shadow-2xs">
+                                                <span>➔ {sub.substituteName}</span>
+                                                <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
+                                              </span>
+                                            </span>
+                                          ) : (
+                                            <span
+                                              className="font-extrabold text-slate-900 text-[14.5px] tracking-tight"
+                                              style={{ fontSize: '11pt' }}
+                                            >
+                                              {p.name}
+                                            </span>
+                                          )}
+                                          {!isPublicView && (
+                                            <button
+                                              type="button"
+                                              disabled={isDone}
+                                              onClick={() => handleOpenSubstitutionModal(match, round, p, 'B')}
+                                              title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
+                                              className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                                isDone
+                                                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                                  : sub
+                                                  ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
+                                                  : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
+                                              }`}
+                                            >
+                                              <ArrowRightLeft className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
+
+                                    <span className="text-slate-400 font-black text-sm px-0.5">&</span>
+
+                                    {/* Team B Player 2 */}
+                                    {(() => {
+                                      const p = match.teamB?.[1];
+                                      if (!p) return <span className="text-slate-400 font-bold">未定</span>;
+                                      const sub = match.substitutions?.[p.id];
+                                      return (
+                                        <div className="inline-flex items-center gap-1.5 bg-white/80 px-2.5 py-1 rounded-xl border border-slate-200/90 shadow-2xs">
+                                          {sub ? (
+                                            <span className="inline-flex items-center gap-1.5">
+                                              <span className="line-through text-slate-400 font-medium text-xs">
+                                                {p.name}
+                                              </span>
+                                              <span className="font-extrabold text-amber-800 bg-amber-100 border border-amber-300 px-1.5 py-0.5 rounded-lg inline-flex items-center gap-1 text-[13.5px] shadow-2xs">
+                                                <span>➔ {sub.substituteName}</span>
+                                                <span className="text-[9px] bg-amber-600 text-white px-1 rounded font-black">代打</span>
+                                              </span>
+                                            </span>
+                                          ) : (
+                                            <span
+                                              className="font-extrabold text-slate-900 text-[14.5px] tracking-tight"
+                                              style={{ fontSize: '11pt' }}
+                                            >
+                                              {p.name}
+                                            </span>
+                                          )}
+                                          {!isPublicView && (
+                                            <button
+                                              type="button"
+                                              disabled={isDone}
+                                              onClick={() => handleOpenSubstitutionModal(match, round, p, 'B')}
+                                              title={isDone ? '本場已完賽，請先解鎖才可更換代打' : sub ? '修改或取消代打' : '若選手受傷或有事，點擊指定代打人員'}
+                                              className={`p-1 rounded text-[10px] font-bold transition-all cursor-pointer ${
+                                                isDone
+                                                  ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                                  : sub
+                                                  ? 'text-amber-800 hover:bg-amber-200 bg-amber-50'
+                                                  : 'text-slate-400 hover:text-amber-700 hover:bg-amber-50'
+                                              }`}
+                                            >
+                                              <ArrowRightLeft className="w-3 h-3" />
+                                            </button>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
+                                  </div>
                                 </div>
                               </div>
 
