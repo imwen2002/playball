@@ -1393,9 +1393,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   }, [courtSchedule]);
 
   return (
-    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6">
-      {/* Top Banner & Control Deck */}
-      <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4 sm:space-y-5">
+    <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6 print:p-0 print:m-0 print:max-w-none print:space-y-0">
+      {/* Top Banner, Stats, Distribution Chart & Tabs Bar - Completely hidden during print */}
+      <div className="space-y-4 sm:space-y-6 no-print print:hidden">
+        {/* Top Banner & Control Deck */}
+        <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4 sm:space-y-5">
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 sm:gap-4 border-b border-slate-100 pb-4">
           <div className="space-y-1">
             <div className="flex items-center gap-2 flex-wrap">
@@ -1749,6 +1751,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             <span>列印公布排版</span>
           </button>
         )}
+      </div>
       </div>
 
       {/* Tab 1: 3-Court Schedule Engine */}
@@ -3871,10 +3874,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 size: A4 portrait;
                 margin: 6mm 6mm;
               }
+              header, footer, nav, .no-print, [class*="no-print"] {
+                display: none !important;
+              }
               body {
                 background: #ffffff !important;
                 -webkit-print-color-adjust: exact !important;
                 print-color-adjust: exact !important;
+              }
+              .max-w-7xl {
+                max-width: 100% !important;
+                padding: 0 !important;
+                margin: 0 !important;
               }
               .print-a4-page {
                 page-break-after: always;
@@ -3889,13 +3900,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 page-break-after: auto !important;
                 break-after: auto !important;
               }
-              .no-print {
-                display: none !important;
-              }
             }
           `}</style>
 
-          <div className="bg-white rounded-2xl p-4 border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 no-print">
+          <div className="bg-white rounded-2xl p-4 border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 no-print print:hidden">
             <div>
               <h4 className="text-sm font-bold text-slate-900">
                 錦標賽名單公布與列印版型
@@ -3911,7 +3919,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 className="px-4 py-2 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
               >
                 <Printer className="w-4 h-4" />
-                <span>啟動瀏覽器列印 (Print)</span>
+                <span>列印</span>
               </button>
             </div>
           </div>
