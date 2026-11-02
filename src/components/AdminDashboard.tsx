@@ -976,12 +976,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     // Immediately close the edit modal so it disappears without delay
     handleCloseEditPlayer();
 
+    // 0ms instant reactivity: always update parent players roster synchronously so AI rescheduling has latest names
+    onUpdatePlayers(players.map((p) => (p.id === oldId ? updatedPlayer : p)));
+
     setIsCloudSyncing(true);
     try {
       if (onSavePlayer) {
-        await onSavePlayer(updatedPlayer);
-      } else {
-        onUpdatePlayers(players.map((p) => (p.id === oldId ? updatedPlayer : p)));
+        onSavePlayer(updatedPlayer).catch((err) => {
+          console.warn('Background save player error:', err);
+        });
       }
 
       // Update name in referees list if this player is in referees
@@ -1033,11 +1036,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             }
           });
         });
+        // Also update playerStats map in schedule so出賽檢核has latest player names immediately
+        if (updatedSchedule!.playerStats) {
+          Object.values(updatedSchedule!.playerStats).forEach((stat: any) => {
+            if (stat && stat.player && (stat.player.id === oldId || stat.player.name === oldName || stat.player.email === cleanEmail)) {
+              stat.player.name = cleanName;
+              stat.player.email = cleanEmail;
+            }
+          });
+        }
         setCourtSchedule(updatedSchedule);
       }
 
       debouncedSaveTournamentState(updatedSchedule, matchScores, updatedReferees, 0);
-      handleCloseEditPlayer();
     } catch (err) {
       console.warn('Optimistic save player background error:', err);
     }
@@ -1851,7 +1862,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       key={i}
                       className="px-2 py-0.5 rounded-md bg-slate-100 border border-slate-200 text-slate-800 text-[11px] font-medium"
                     >
-                      {formatCleanTierGroupLabel(div.tierLabel)}（{div.players.map((p) => p.name).join('、')}）
+                      {div.players.map((p) => {
+                        const matched = players.find((pl) => pl.id === p.id || pl.email.toLowerCase() === (p.email || '').toLowerCase());
+                        return matched?.name || p.name;
+                      }).join('、')}
                     </span>
                   ))}
                 </div>
@@ -2631,14 +2645,14 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     <div className="col-span-full space-y-6">
                       {divisionGroups.map((group, gIdx) => (
                         <div key={group.divisionIndex} className="space-y-3">
-                          {/* Division Group Header (Lowest tier to Highest tier) */}
+                          {/* Division Group Header (Strictly 第 X 組 without any tier labels) */}
                           <div className="bg-slate-100/90 border border-slate-200 rounded-xl px-3.5 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 shadow-2xs">
                             <div className="flex items-center gap-2 flex-wrap">
                               <span className="w-5 h-5 rounded-md bg-emerald-600 text-white text-[11px] font-black flex items-center justify-center shrink-0">
                                 {gIdx + 1}
                               </span>
                               <span className="font-extrabold text-sm text-slate-900 tracking-tight">
-                                {group.label}
+                                第 {gIdx + 1} 組
                               </span>
                             </div>
                             <span className="text-[11px] text-slate-500 font-medium">
@@ -2650,7 +2664,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {group.stats.map((stat) => {
                               const isExpanded = expandedPlayerStats === stat.player.id;
-                              const tier = getTierByLevel(stat.player.level ?? 0);
+                              const latestPlayer = players.find(
+                                (p) => p.id === stat.player.id || p.email.toLowerCase() === (stat.player.email || '').toLowerCase()
+                              );
+                              const currentName = latestPlayer?.name || stat.player.name;
 
                               return (
                                 <div
@@ -2665,10 +2682,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   >
                                     <div className="flex items-center gap-2">
                                       <span className="font-extrabold text-sm text-slate-900">
-                                        {stat.player.name}
-                                      </span>
-                                      <span className={`px-2 py-0.5 text-[10px] font-bold rounded ${tier.colorClass.badge}`}>
-                                        {tier.name}
+                                        {currentName}
                                       </span>
                                     </div>
 
@@ -2690,27 +2704,37 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   {/* Expanded Match List */}
                                   {isExpanded && (
                                     <div className="pt-2 border-t border-slate-200 space-y-1.5 text-xs animate-in fade-in">
-                                      {(stat.matches || []).map((m, idx) => (
-                                        <div
-                                          key={m.matchId || `match-${idx}`}
-                                          className="p-2 bg-white rounded-lg border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px]"
-                                        >
-                                          <div className="flex items-center gap-1.5">
-                                            <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.2 rounded">
-                                              第 {idx + 1} 場
-                                            </span>
-                                            <span className="font-bold text-emerald-700">
-                                              第 {m.roundNumber || 0} 輪 · 場地 {m.courtNumber || 0}
-                                            </span>
+                                      {(stat.matches || []).map((m, idx) => {
+                                        const getLatestName = (p?: { id?: string; name?: string; email?: string }) => {
+                                          if (!p) return '未定';
+                                          const found = players.find(
+                                            (pl) => pl.id === p.id || (p.email && pl.email.toLowerCase() === p.email.toLowerCase())
+                                          );
+                                          return found?.name || p.name || '未定';
+                                        };
+
+                                        return (
+                                          <div
+                                            key={m.matchId || `match-${idx}`}
+                                            className="p-2 bg-white rounded-lg border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-1 text-[11px]"
+                                          >
+                                            <div className="flex items-center gap-1.5">
+                                              <span className="font-bold text-slate-900 bg-slate-100 px-1.5 py-0.2 rounded">
+                                                第 {idx + 1} 場
+                                              </span>
+                                              <span className="font-bold text-emerald-700">
+                                                第 {m.roundNumber || 0} 輪 · 場地 {m.courtNumber || 0}
+                                              </span>
+                                            </div>
+                                            <div className="text-slate-600">
+                                              搭檔：<strong className="text-slate-900">{getLatestName(m.partner)}</strong> vs{' '}
+                                              <span className="text-slate-700">
+                                                {getLatestName(m.opponents?.[0])} & {getLatestName(m.opponents?.[1])}
+                                              </span>
+                                            </div>
                                           </div>
-                                          <div className="text-slate-600">
-                                            搭檔：<strong className="text-slate-900">{m.partner?.name || '未定'}</strong> vs{' '}
-                                            <span className="text-slate-700">
-                                              {m.opponents?.[0]?.name || '未定'} & {m.opponents?.[1]?.name || '未定'}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      ))}
+                                        );
+                                      })}
                                     </div>
                                   )}
                                 </div>
