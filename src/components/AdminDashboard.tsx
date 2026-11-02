@@ -57,6 +57,7 @@ import {
   Share2,
   CheckSquare,
   Square,
+  Pencil,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -187,6 +188,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const [newPlayerEmail, setNewPlayerEmail] = useState('');
   const [newPlayerLevel, setNewPlayerLevel] = useState(0); // Default Level 0
   const [newPlayerGender, setNewPlayerGender] = useState<'male' | 'female'>('male');
+
+  // Edit player modal state
+  const [editingPlayer, setEditingPlayer] = useState<PlayerSubmission | null>(null);
+  const [editPlayerName, setEditPlayerName] = useState('');
+  const [editPlayerEmail, setEditPlayerEmail] = useState('');
 
   // Copy notice
   const [hasCopiedText, setHasCopiedText] = useState(false);
@@ -874,6 +880,115 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setNewPlayerLevel(0);
   };
 
+  // Open & Close Edit Player Modal
+  const handleOpenEditPlayer = (player: PlayerSubmission) => {
+    setEditingPlayer(player);
+    setEditPlayerName(player.name);
+    setEditPlayerEmail(player.email);
+  };
+
+  const handleCloseEditPlayer = () => {
+    setEditingPlayer(null);
+    setEditPlayerName('');
+    setEditPlayerEmail('');
+  };
+
+  // Save edited player to Firestore & update live tournament state
+  const handleSaveEditPlayer = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingPlayer) return;
+    const cleanName = editPlayerName.trim();
+    const cleanEmail = editPlayerEmail.trim().toLowerCase();
+    if (!cleanName) {
+      alert('請輸入選手姓名！');
+      return;
+    }
+    if (!cleanEmail || !cleanEmail.includes('@')) {
+      alert('請輸入有效的聯絡信箱 (Email)！');
+      return;
+    }
+
+    const oldName = editingPlayer.name;
+    const oldId = editingPlayer.id;
+
+    const updatedPlayer: PlayerSubmission = {
+      ...editingPlayer,
+      name: cleanName,
+      email: cleanEmail,
+      updatedAt: new Date().toISOString(),
+    };
+
+    setIsCloudSyncing(true);
+    try {
+      if (onSavePlayer) {
+        await onSavePlayer(updatedPlayer);
+      } else {
+        onUpdatePlayers(players.map((p) => (p.id === oldId ? updatedPlayer : p)));
+      }
+
+      // Update name in referees list if this player is in referees
+      let updatedReferees = referees;
+      const hasInRefs = referees.some((r) => r.isPlayer && (r.playerId === oldId || r.name === oldName));
+      if (hasInRefs) {
+        updatedReferees = referees.map((r) =>
+          r.isPlayer && (r.playerId === oldId || r.name === oldName)
+            ? { ...r, name: cleanName, email: cleanEmail }
+            : r
+        );
+        setReferees(updatedReferees);
+      }
+
+      // Update name in current courtSchedule if exists
+      let updatedSchedule = courtSchedule;
+      if (courtSchedule && courtSchedule.rounds) {
+        updatedSchedule = JSON.parse(JSON.stringify(courtSchedule));
+        (updatedSchedule!.rounds || []).forEach((round) => {
+          (round.matches || []).forEach((m) => {
+            (m.teamA || []).forEach((p) => {
+              if (p.id === oldId || p.name === oldName) {
+                p.name = cleanName;
+                p.email = cleanEmail;
+              }
+            });
+            (m.teamB || []).forEach((p) => {
+              if (p.id === oldId || p.name === oldName) {
+                p.name = cleanName;
+                p.email = cleanEmail;
+              }
+            });
+            if (m.refereeId === oldId || m.refereeName === oldName) {
+              m.refereeName = cleanName;
+            }
+          });
+          (round.restingPlayers || []).forEach((p) => {
+            if (p.id === oldId || p.name === oldName) {
+              p.name = cleanName;
+              p.email = cleanEmail;
+            }
+          });
+        });
+        (updatedSchedule!.tierDivisions || []).forEach((div) => {
+          (div.players || []).forEach((p) => {
+            if (p.id === oldId || p.name === oldName) {
+              p.name = cleanName;
+              p.email = cleanEmail;
+            }
+          });
+        });
+        setCourtSchedule(updatedSchedule);
+      }
+
+      await saveTournamentState(updatedSchedule, matchScores, updatedReferees);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+      handleCloseEditPlayer();
+    } catch (err) {
+      console.warn('Failed saving edited player:', err);
+      alert('儲存修改時發生錯誤，請稍後重試。');
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
   // Update match score in schedule (Strictly 0 or 1, mutually exclusive, locked if completed, auto cloud-saved)
   const handleUpdateMatchScore = async (matchId: string, team: 'A' | 'B', score: number) => {
     const current = matchScores[matchId] || { scoreA: 0, scoreB: 0, completed: false };
@@ -985,12 +1100,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTimeout(() => setHasCopiedText(false), 2500);
   };
 
-  // Helper to remove "Lv X · " or "Lv X ~ Lv Y · " from tierGroupLabel for clean print and share view
+  // Helper to remove "Lv X · ", "Lv X ~ Lv Y · ", and "5人循環" from tierGroupLabel for clean print view
   const formatCleanTierGroupLabel = (label?: string): string => {
     if (!label) return '';
     return label
       .replace(/\(\s*Lv\s*\d+(\s*[~-]\s*Lv\s*\d+)?\s*[·•-]?\s*/gi, '(')
       .replace(/Lv\s*\d+(\s*[~-]\s*Lv\s*\d+)?\s*[·•-]?\s*/gi, '')
+      .replace(/[-–—·•]?\s*5\s*人循環/gi, '')
+      .replace(/5\s*人循環/gi, '')
+      .replace(/\(\s*[-–—·•]\s*/g, '(')
+      .replace(/[-–—·•]\s*\)/g, ')')
       .replace(/\(\s*\)/g, '')
       .trim();
   };
@@ -1258,8 +1377,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     link.setAttribute('download', `羽球錦標賽_個人得分獎金結算名冊_${new Date().toISOString().split('T')[0]}.csv`);
     document.body.appendChild(link);
     link.click();
-    document.body.removeChild(link);
   };
+
+  // Group rounds into 4-round A4 pages for standard print layout (Strictly 4 rounds per A4 sheet)
+  const printPages = useMemo(() => {
+    if (!courtSchedule || !Array.isArray(courtSchedule.rounds) || courtSchedule.rounds.length === 0) return [];
+    const pages: ScheduleRound[][] = [];
+    for (let i = 0; i < courtSchedule.rounds.length; i += 4) {
+      pages.push(courtSchedule.rounds.slice(i, i + 4));
+    }
+    return pages;
+  }, [courtSchedule]);
 
   return (
     <div className="max-w-7xl mx-auto px-3 sm:px-6 lg:px-8 py-4 sm:py-8 space-y-4 sm:space-y-6">
@@ -3236,9 +3364,17 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           </button>
                           <button
                             type="button"
+                            onClick={() => handleOpenEditPlayer(player)}
+                            title="編輯選手姓名與信箱"
+                            className="w-7 h-7 rounded-lg text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 flex items-center justify-center transition-colors cursor-pointer ml-1"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            type="button"
                             onClick={() => handleDeletePlayer(player.id)}
                             title="移除此選手"
-                            className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors cursor-pointer ml-1"
+                            className="w-7 h-7 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 flex items-center justify-center transition-colors cursor-pointer ml-0.5"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </button>
@@ -3327,14 +3463,25 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               </div>
                             </td>
                             <td className="py-3 px-4 text-right whitespace-nowrap">
-                              <button
-                                type="button"
-                                onClick={() => handleDeletePlayer(player.id)}
-                                title="移除此選手"
-                                className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
+                              <div className="flex items-center justify-end gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEditPlayer(player)}
+                                  title="編輯選手姓名與信箱"
+                                  className="p-1.5 text-slate-500 hover:text-emerald-700 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer flex items-center gap-1"
+                                >
+                                  <Pencil className="w-3.5 h-3.5 text-emerald-600" />
+                                  <span className="text-[11px] font-semibold text-slate-700 hidden sm:inline">編輯</span>
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeletePlayer(player.id)}
+                                  title="移除此選手"
+                                  className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         );
@@ -3714,24 +3861,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       {/* Tab 3: Print View */}
       {activeAdminTab === 'print' && (
         <div className="space-y-6">
+          {/* Print Styles for Standard A4 Pagination */}
+          <style>{`
+            @media print {
+              @page {
+                size: A4 portrait;
+                margin: 8mm 6mm;
+              }
+              body {
+                background: #ffffff !important;
+                -webkit-print-color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              .print-a4-page {
+                page-break-after: always;
+                break-after: page;
+                min-height: 272mm;
+                box-sizing: border-box;
+                display: flex;
+                flex-direction: column;
+                justify-content: flex-start;
+              }
+              .print-a4-page:last-child {
+                page-break-after: auto !important;
+                break-after: auto !important;
+              }
+              .no-print {
+                display: none !important;
+              }
+            }
+          `}</style>
+
           <div className="bg-white rounded-2xl p-4 border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 no-print">
             <div>
               <h4 className="text-sm font-bold text-slate-900">
                 錦標賽名單公布與列印版型
               </h4>
               <p className="text-xs text-slate-500">
-                本頁已針對 A4 紙張與球場公布欄進行版面優化，可直接列印、另存 PDF 或一鍵分享至公司群組。
+                本頁以標準 A4 紙張格式排版，每張 A4 固定收納 4 輪對戰賽程（無輪休標註與純淨組別），可直接啟動列印或另存 PDF。
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
-              <button
-                type="button"
-                onClick={handleShareSchedule}
-                className="px-3.5 py-2 text-xs font-bold text-slate-800 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
-              >
-                <Share2 className="w-4 h-4 text-emerald-600" />
-                <span>{shareFeedback ? '已開啟新分頁！' : '分享賽程表 (另開公開分頁)'}</span>
-              </button>
               <button
                 type="button"
                 onClick={() => window.print()}
@@ -3743,126 +3913,157 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* Printable Sheet */}
-          <div className="bg-white p-6 sm:p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6 print:border-none print:shadow-none print:p-0">
-            <div className="text-center border-b-2 border-slate-900 pb-4">
-              <h2 className="text-2xl font-black text-slate-900 tracking-tight">
-                🏸 義鼎杯羽球錦標賽 · 賽程分組公告表
-              </h2>
-              <p className="text-xs text-slate-600 mt-1">
-                賽制：3個場地循環賽 · 同級選手每人打滿 4 場 · 參賽選手：{players.length} 人
-              </p>
-            </div>
+          {/* Printable Sheets partitioned strictly 4 rounds per A4 page */}
+          {courtSchedule && Array.isArray(courtSchedule.rounds) && courtSchedule.rounds.length > 0 ? (
+            <div className="space-y-6 print:space-y-0">
+              {printPages.map((pageRounds, pageIdx) => {
+                const isLastPage = pageIdx === printPages.length - 1;
+                const startRound = pageIdx * 4 + 1;
+                const endRound = Math.min((pageIdx + 1) * 4, courtSchedule.rounds.length);
 
-            {courtSchedule && Array.isArray(courtSchedule.rounds) && courtSchedule.rounds.length > 0 ? (
-              <div className="space-y-6">
-                {courtSchedule.rounds.map((round) => (
-                  <div key={round.roundNumber} className="border border-slate-300 rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between border-b pb-2">
-                      <span className="font-extrabold text-base text-slate-900">
-                        📍 第 {round.roundNumber} 輪次對戰表
-                      </span>
-                      {round.restingPlayers && round.restingPlayers.length > 0 && (
-                        <span className="text-xs text-slate-500">
-                          輪休：{round.restingPlayers.map((p) => p?.name || '').filter(Boolean).join('、')}
+                return (
+                  <div
+                    key={`print-page-${pageIdx}`}
+                    className={`print-a4-page bg-white p-5 sm:p-7 rounded-2xl border border-slate-200 shadow-sm print:border-none print:shadow-none print:p-0 space-y-3 print:space-y-2 ${
+                      !isLastPage ? 'print:break-after-page' : ''
+                    }`}
+                    style={{
+                      pageBreakAfter: !isLastPage ? 'always' : 'auto',
+                      breakAfter: !isLastPage ? 'page' : 'auto',
+                    }}
+                  >
+                    {/* Page Header */}
+                    <div className="border-b-2 border-slate-900 pb-2 flex items-end justify-between">
+                      <div>
+                        <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                          🏸 義鼎杯羽球錦標賽 · 賽程公告表
+                        </h2>
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          賽制：3 個場地 · 每人出賽 4 場 · 參賽選手：{players.length} 人
+                        </p>
+                      </div>
+                      <div className="text-right">
+                        <span className="inline-block px-3 py-1 bg-slate-900 text-white font-mono font-bold text-xs rounded-lg print:text-black print:bg-slate-100 print:border print:border-slate-300">
+                          第 {pageIdx + 1} 頁 / 共 {printPages.length} 頁 (輪次 {startRound} ~ {endRound})
                         </span>
-                      )}
+                      </div>
                     </div>
-                    <div className="grid grid-cols-3 gap-3 text-xs">
-                      {[1, 2, 3].map((cNum) => {
-                        const m = (round.matches || []).find((match) => match && match.courtNumber === cNum);
-                        if (!m) {
-                          return (
-                            <div
-                              key={`print-idle-${cNum}`}
-                              className="p-3 bg-slate-50/60 rounded-lg border border-dashed border-slate-300 space-y-1 flex flex-col items-center justify-center min-h-[90px] text-center"
-                            >
-                              <span className="font-bold text-slate-500 block text-[11px]">
-                                場地 {cNum}
-                              </span>
-                              <span className="text-[11px] text-slate-400">本輪輪空待命</span>
-                            </div>
-                          );
-                        }
 
-                        const cleanGroup = formatCleanTierGroupLabel(m.tierGroupLabel);
-                        const teamAStr = (() => {
-                          const p0 = m.teamA?.[0];
-                          const p1 = m.teamA?.[1];
-                          const sub0 = p0 ? m.substitutions?.[p0.id] : undefined;
-                          const sub1 = p1 ? m.substitutions?.[p1.id] : undefined;
-                          const name0 = p0 ? (sub0 ? `${p0.name}(${sub0.substituteName}代)` : p0.name) : '未定';
-                          const name1 = p1 ? (sub1 ? `${p1.name}(${sub1.substituteName}代)` : p1.name) : '未定';
-                          return `${name0} & ${name1}`;
-                        })();
-                        const teamBStr = (() => {
-                          const p0 = m.teamB?.[0];
-                          const p1 = m.teamB?.[1];
-                          const sub0 = p0 ? m.substitutions?.[p0.id] : undefined;
-                          const sub1 = p1 ? m.substitutions?.[p1.id] : undefined;
-                          const name0 = p0 ? (sub0 ? `${p0.name}(${sub0.substituteName}代)` : p0.name) : '未定';
-                          const name1 = p1 ? (sub1 ? `${p1.name}(${sub1.substituteName}代)` : p1.name) : '未定';
-                          return `${name0} & ${name1}`;
-                        })();
-
-                        return (
-                          <div key={m.id} className="p-4 bg-slate-50 rounded-xl border border-slate-300 text-center space-y-2">
-                            <div
-                              className="font-bold text-slate-800 text-[18px] print:text-[13.5pt] leading-normal"
-                              style={{ fontSize: '13.5pt' }}
-                            >
-                              場地 {m.courtNumber}{cleanGroup ? ` (${cleanGroup})` : ''}
-                            </div>
-                            <div
-                              className="font-extrabold text-slate-900 text-[19px] print:text-[14pt] flex items-center justify-center gap-2.5 flex-wrap leading-normal"
-                              style={{ fontSize: '14pt' }}
-                            >
-                              <span>{teamAStr}</span>
-                              <span
-                                className="font-black text-slate-400 text-[15px] px-1 print:text-[11.5pt]"
-                                style={{ fontSize: '11.5pt' }}
-                              >
-                                VS
-                              </span>
-                              <span>{teamBStr}</span>
-                            </div>
-                            {/* Referee display in print card */}
-                            <div className="text-[12px] print:text-[9.5pt] text-slate-600 font-bold flex items-center justify-center gap-1.5 pt-0.5 border-t border-slate-200/60">
-                              <span className="text-slate-400">裁判：</span>
-                              {m.refereeSubstitution ? (
-                                <span className="text-indigo-900 font-black">
-                                  {m.refereeSubstitution.substituteRefereeName} (代執)
-                                </span>
-                              ) : (
-                                <span className="text-slate-700 font-bold">
-                                  {m.refereeName || '大會指派'}
-                                </span>
-                              )}
-                            </div>
+                    {/* 4 Rounds in this Page */}
+                    <div className="space-y-2.5 print:space-y-2 flex-1">
+                      {pageRounds.map((round) => (
+                        <div
+                          key={round.roundNumber}
+                          className="border border-slate-300 rounded-xl p-2.5 print:p-2 space-y-1.5 print:break-inside-avoid"
+                          style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}
+                        >
+                          {/* Round Title: WITHOUT 輪休人員 */}
+                          <div className="flex items-center justify-between border-b border-slate-200 pb-1">
+                            <span className="font-extrabold text-sm sm:text-base print:text-[11pt] text-slate-900">
+                              📍 第 {round.roundNumber} 輪次對戰表
+                            </span>
                           </div>
-                        );
-                      })}
+
+                          {/* 3 Courts Grid */}
+                          <div className="grid grid-cols-3 gap-2.5 print:gap-2 text-xs">
+                            {[1, 2, 3].map((cNum) => {
+                              const m = (round.matches || []).find((match) => match && match.courtNumber === cNum);
+                              if (!m) {
+                                return (
+                                  <div
+                                    key={`print-idle-${cNum}`}
+                                    className="p-3 bg-slate-50/60 rounded-lg border border-dashed border-slate-300 space-y-1 flex flex-col items-center justify-center min-h-[75px] text-center"
+                                  >
+                                    <span className="font-bold text-slate-500 block text-[11px]">
+                                      場地 {cNum}
+                                    </span>
+                                    <span className="text-[11px] text-slate-400">本輪輪空待命</span>
+                                  </div>
+                                );
+                              }
+
+                              const cleanGroup = formatCleanTierGroupLabel(m.tierGroupLabel);
+                              const teamAStr = (() => {
+                                const p0 = m.teamA?.[0];
+                                const p1 = m.teamA?.[1];
+                                const sub0 = p0 ? m.substitutions?.[p0.id] : undefined;
+                                const sub1 = p1 ? m.substitutions?.[p1.id] : undefined;
+                                const name0 = p0 ? (sub0 ? `${p0.name}(${sub0.substituteName}代)` : p0.name) : '未定';
+                                const name1 = p1 ? (sub1 ? `${p1.name}(${sub1.substituteName}代)` : p1.name) : '未定';
+                                return `${name0} & ${name1}`;
+                              })();
+                              const teamBStr = (() => {
+                                const p0 = m.teamB?.[0];
+                                const p1 = m.teamB?.[1];
+                                const sub0 = p0 ? m.substitutions?.[p0.id] : undefined;
+                                const sub1 = p1 ? m.substitutions?.[p1.id] : undefined;
+                                const name0 = p0 ? (sub0 ? `${p0.name}(${sub0.substituteName}代)` : p0.name) : '未定';
+                                const name1 = p1 ? (sub1 ? `${p1.name}(${sub1.substituteName}代)` : p1.name) : '未定';
+                                return `${name0} & ${name1}`;
+                              })();
+
+                              return (
+                                <div
+                                  key={m.id}
+                                  className="p-2.5 print:p-2 bg-slate-50/80 rounded-xl border border-slate-300 text-center space-y-1"
+                                >
+                                  <div className="font-bold text-slate-800 text-xs sm:text-sm print:text-[9.5pt] leading-snug">
+                                    場地 {m.courtNumber}{cleanGroup ? ` (${cleanGroup})` : ''}
+                                  </div>
+                                  <div className="font-extrabold text-slate-900 text-xs sm:text-sm print:text-[10pt] flex items-center justify-center gap-1.5 flex-wrap leading-tight">
+                                    <span>{teamAStr}</span>
+                                    <span className="font-black text-slate-400 text-[10px] print:text-[8.5pt] px-0.5">
+                                      VS
+                                    </span>
+                                    <span>{teamBStr}</span>
+                                  </div>
+                                  {/* Referee display in print card */}
+                                  <div className="text-[11px] print:text-[8pt] text-slate-600 font-semibold flex items-center justify-center gap-1 pt-0.5 border-t border-slate-200/60">
+                                    <span className="text-slate-400">裁判：</span>
+                                    {m.refereeSubstitution ? (
+                                      <span className="text-indigo-900 font-bold">
+                                        {m.refereeSubstitution.substituteRefereeName} (代執)
+                                      </span>
+                                    ) : (
+                                      <span className="text-slate-700 font-bold">
+                                        {m.refereeName || '大會指派'}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Page Footer */}
+                    <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-400">
+                      <span>義鼎杯羽球賽 · 3場地循環賽程表</span>
+                      <span>第 {pageIdx + 1} 頁 / 共 {printPages.length} 頁</span>
                     </div>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-center text-slate-400 py-8 text-xs">
-                尚未排定賽程，請先至「3 場地循環排程表」點選「一鍵排定 3 場地賽程」。
-              </p>
-            )}
+                );
+              })}
+            </div>
+          ) : (
+            <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center text-slate-400">
+              尚未排定賽程，請先至「3 場地循環排程表」點選「一鍵排定 3 場地賽程」。
+            </div>
+          )}
 
-            {/* Printable Individual Score Leaderboard Table (By Score Brackets) */}
-            {courtSchedule && courtSchedule.rounds.length > 0 && (
-              <div className="pt-4 border-t-2 border-slate-900 space-y-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-black text-base text-slate-900">
-                    🏆 選手個人勝場得分與獎金組別公告榜 (4分組、3分組、2分組、1分組、0分組)
-                  </h3>
-                  <span className="text-xs text-slate-500">
-                    賽制：每人打滿 4 場 · 1 勝得 1 分 · 獎金依勝場積分組別頒發
-                  </span>
-                </div>
+          {/* Printable Individual Score Leaderboard Table (By Score Brackets) */}
+          {courtSchedule && courtSchedule.rounds.length > 0 && (
+            <div className="pt-6 border-t-2 border-slate-900 space-y-4 print:break-before-page">
+              <div className="flex items-center justify-between">
+                <h3 className="font-black text-base text-slate-900">
+                  🏆 選手個人勝場得分與獎金組別公告榜 (4分組、3分組、2分組、1分組、0分組)
+                </h3>
+                <span className="text-xs text-slate-500">
+                  賽制：每人打滿 4 場 · 1 勝得 1 分 · 獎金依勝場積分組別頒發
+                </span>
+              </div>
 
                 <div className="space-y-4">
                   {[4, 3, 2, 1, 0].map((pts) => {
@@ -3920,11 +4121,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </div>
             )}
 
-            <div className="pt-4 border-t border-slate-200 flex items-center justify-between text-[11px] text-slate-500">
+            <div className="bg-white p-4 rounded-xl border border-slate-200 flex items-center justify-between text-[11px] text-slate-500 no-print">
               <span>列印時間：{new Date().toLocaleString('zh-TW')}</span>
               <span>主辦單位敬啟 · 祝各位同仁以球會友、盡情揮灑汗水！</span>
             </div>
-          </div>
         </div>
       )}
 
@@ -4008,6 +4208,86 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   className="px-4 py-2 font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
                 >
                   確認新增
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Player Modal */}
+      {editingPlayer && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="w-full max-w-md bg-white rounded-2xl shadow-xl border border-slate-200 overflow-hidden p-6 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2">
+                <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
+                  <Pencil className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-base text-slate-900">編輯選手資料</h3>
+                  <p className="text-[11px] text-slate-400">修改選手姓名與帳號信箱，雲端即時同步</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseEditPlayer}
+                className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEditPlayer} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  選手姓名 / 稱呼 <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={editPlayerName}
+                  onChange={(e) => setEditPlayerName(e.target.value)}
+                  placeholder="請輸入選手姓名"
+                  className="w-full p-2.5 border border-slate-300 rounded-xl bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm font-bold text-slate-900"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  聯絡信箱 (Email) <span className="text-rose-500">*</span>
+                </label>
+                <input
+                  type="email"
+                  required
+                  value={editPlayerEmail}
+                  onChange={(e) => setEditPlayerEmail(e.target.value)}
+                  placeholder="請輸入 Email"
+                  className="w-full p-2.5 border border-slate-300 rounded-xl bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 text-sm font-mono text-slate-800"
+                />
+              </div>
+
+              <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 text-slate-600 flex items-center justify-between">
+                <span>目前選手戰力級數：</span>
+                <span className="font-black text-sm text-emerald-800 bg-emerald-100 px-2.5 py-0.5 rounded-lg">
+                  Lv {editingPlayer.level} ({editingPlayer.tierName})
+                </span>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={handleCloseEditPlayer}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="submit"
+                  className="px-5 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>儲存修改</span>
                 </button>
               </div>
             </form>
