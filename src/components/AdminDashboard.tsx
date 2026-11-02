@@ -918,6 +918,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       updatedAt: new Date().toISOString(),
     };
 
+    // Immediately close the edit modal so it disappears without delay
+    handleCloseEditPlayer();
+
     setIsCloudSyncing(true);
     try {
       if (onSavePlayer) {
@@ -1379,12 +1382,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     link.click();
   };
 
-  // Group rounds into 4-round A4 pages for standard print layout (Strictly 4 rounds per A4 sheet)
+  // Group rounds into 5-round A4 pages for standard print layout (Strictly 5 rounds per A4 sheet)
   const printPages = useMemo(() => {
     if (!courtSchedule || !Array.isArray(courtSchedule.rounds) || courtSchedule.rounds.length === 0) return [];
     const pages: ScheduleRound[][] = [];
-    for (let i = 0; i < courtSchedule.rounds.length; i += 4) {
-      pages.push(courtSchedule.rounds.slice(i, i + 4));
+    for (let i = 0; i < courtSchedule.rounds.length; i += 5) {
+      pages.push(courtSchedule.rounds.slice(i, i + 5));
     }
     return pages;
   }, [courtSchedule]);
@@ -3866,7 +3869,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             @media print {
               @page {
                 size: A4 portrait;
-                margin: 8mm 6mm;
+                margin: 6mm 6mm;
               }
               body {
                 background: #ffffff !important;
@@ -3876,7 +3879,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               .print-a4-page {
                 page-break-after: always;
                 break-after: page;
-                min-height: 272mm;
+                min-height: 275mm;
                 box-sizing: border-box;
                 display: flex;
                 flex-direction: column;
@@ -3898,7 +3901,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 錦標賽名單公布與列印版型
               </h4>
               <p className="text-xs text-slate-500">
-                本頁以標準 A4 紙張格式排版，每張 A4 固定收納 4 輪對戰賽程（無輪休標註與純淨組別），可直接啟動列印或另存 PDF。
+                本頁以標準 A4 紙張格式排版，每張 A4 固定收納 5 輪對戰賽程（純淨標題與對戰組別），可直接啟動列印或另存 PDF。
               </p>
             </div>
             <div className="flex items-center gap-2 flex-wrap">
@@ -3913,18 +3916,18 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
-          {/* Printable Sheets partitioned strictly 4 rounds per A4 page */}
+          {/* Printable Sheets partitioned strictly 5 rounds per A4 page */}
           {courtSchedule && Array.isArray(courtSchedule.rounds) && courtSchedule.rounds.length > 0 ? (
             <div className="space-y-6 print:space-y-0">
               {printPages.map((pageRounds, pageIdx) => {
                 const isLastPage = pageIdx === printPages.length - 1;
-                const startRound = pageIdx * 4 + 1;
-                const endRound = Math.min((pageIdx + 1) * 4, courtSchedule.rounds.length);
+                const startRound = pageIdx * 5 + 1;
+                const endRound = Math.min((pageIdx + 1) * 5, courtSchedule.rounds.length);
 
                 return (
                   <div
                     key={`print-page-${pageIdx}`}
-                    className={`print-a4-page bg-white p-5 sm:p-7 rounded-2xl border border-slate-200 shadow-sm print:border-none print:shadow-none print:p-0 space-y-3 print:space-y-2 ${
+                    className={`print-a4-page bg-white p-4 sm:p-6 rounded-2xl border border-slate-200 shadow-sm print:border-none print:shadow-none print:p-0 space-y-2.5 print:space-y-1.5 ${
                       !isLastPage ? 'print:break-after-page' : ''
                     }`}
                     style={{
@@ -3932,47 +3935,47 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                       breakAfter: !isLastPage ? 'page' : 'auto',
                     }}
                   >
-                    {/* Page Header */}
-                    <div className="border-b-2 border-slate-900 pb-2 flex items-end justify-between">
-                      <div>
-                        <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
+                    {/* Page Header: Print only shows the clean championship title */}
+                    <div className="border-b-2 border-slate-900 pb-1.5 flex items-center justify-between print:border-b-2 print:pb-1 print:mb-1">
+                      <div className="w-full text-center">
+                        <h2 className="text-xl sm:text-2xl print:text-[14pt] font-black text-slate-900 tracking-tight">
                           🏸 義鼎杯羽球錦標賽 · 賽程公告表
                         </h2>
-                        <p className="text-xs text-slate-600 mt-0.5">
+                        <p className="text-xs text-slate-600 mt-0.5 print:hidden">
                           賽制：3 個場地 · 每人出賽 4 場 · 參賽選手：{players.length} 人
                         </p>
                       </div>
-                      <div className="text-right">
-                        <span className="inline-block px-3 py-1 bg-slate-900 text-white font-mono font-bold text-xs rounded-lg print:text-black print:bg-slate-100 print:border print:border-slate-300">
+                      <div className="text-right shrink-0 print:hidden">
+                        <span className="inline-block px-3 py-1 bg-slate-900 text-white font-mono font-bold text-xs rounded-lg">
                           第 {pageIdx + 1} 頁 / 共 {printPages.length} 頁 (輪次 {startRound} ~ {endRound})
                         </span>
                       </div>
                     </div>
 
-                    {/* 4 Rounds in this Page */}
-                    <div className="space-y-2.5 print:space-y-2 flex-1">
+                    {/* 5 Rounds in this Page */}
+                    <div className="space-y-2 print:space-y-1.5 flex-1">
                       {pageRounds.map((round) => (
                         <div
                           key={round.roundNumber}
-                          className="border border-slate-300 rounded-xl p-2.5 print:p-2 space-y-1.5 print:break-inside-avoid"
+                          className="border border-slate-300 rounded-xl p-2 print:p-1.5 space-y-1 print:space-y-0.5 print:break-inside-avoid"
                           style={{ breakInside: 'avoid', pageBreakInside: 'avoid' }}
                         >
                           {/* Round Title: WITHOUT 輪休人員 */}
-                          <div className="flex items-center justify-between border-b border-slate-200 pb-1">
-                            <span className="font-extrabold text-sm sm:text-base print:text-[11pt] text-slate-900">
+                          <div className="flex items-center justify-between border-b border-slate-200 pb-0.5">
+                            <span className="font-extrabold text-sm print:text-[10pt] text-slate-900">
                               📍 第 {round.roundNumber} 輪次對戰表
                             </span>
                           </div>
 
                           {/* 3 Courts Grid */}
-                          <div className="grid grid-cols-3 gap-2.5 print:gap-2 text-xs">
+                          <div className="grid grid-cols-3 gap-2 print:gap-1.5 text-xs">
                             {[1, 2, 3].map((cNum) => {
                               const m = (round.matches || []).find((match) => match && match.courtNumber === cNum);
                               if (!m) {
                                 return (
                                   <div
                                     key={`print-idle-${cNum}`}
-                                    className="p-3 bg-slate-50/60 rounded-lg border border-dashed border-slate-300 space-y-1 flex flex-col items-center justify-center min-h-[75px] text-center"
+                                    className="p-2.5 bg-slate-50/60 rounded-lg border border-dashed border-slate-300 space-y-1 flex flex-col items-center justify-center min-h-[85px] text-center"
                                   >
                                     <span className="font-bold text-slate-500 block text-[11px]">
                                       場地 {cNum}
@@ -4005,20 +4008,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               return (
                                 <div
                                   key={m.id}
-                                  className="p-2.5 print:p-2 bg-slate-50/80 rounded-xl border border-slate-300 text-center space-y-1"
+                                  className="p-2 sm:p-2.5 print:p-1.5 bg-slate-50/80 rounded-xl border border-slate-300 text-center flex flex-col justify-between"
                                 >
-                                  <div className="font-bold text-slate-800 text-xs sm:text-sm print:text-[9.5pt] leading-snug">
-                                    場地 {m.courtNumber}{cleanGroup ? ` (${cleanGroup})` : ''}
+                                  {/* 第 1 行：場地與組別 */}
+                                  <div className="font-bold text-slate-800 text-xs sm:text-sm print:text-[9.5pt] leading-tight">
+                                    場地 {m.courtNumber} {cleanGroup ? (cleanGroup.startsWith('【') ? cleanGroup : `【${cleanGroup}】`) : ''}
                                   </div>
-                                  <div className="font-extrabold text-slate-900 text-xs sm:text-sm print:text-[10pt] flex items-center justify-center gap-1.5 flex-wrap leading-tight">
-                                    <span>{teamAStr}</span>
-                                    <span className="font-black text-slate-400 text-[10px] print:text-[8.5pt] px-0.5">
-                                      VS
-                                    </span>
-                                    <span>{teamBStr}</span>
+
+                                  {/* 第 2 行：隊伍 A 選手搭檔 */}
+                                  <div className="font-extrabold text-slate-900 text-xs sm:text-sm print:text-[10pt] leading-tight mt-1.5 print:mt-1">
+                                    {teamAStr}
                                   </div>
-                                  {/* Referee display in print card */}
-                                  <div className="text-[11px] print:text-[8pt] text-slate-600 font-semibold flex items-center justify-center gap-1 pt-0.5 border-t border-slate-200/60">
+
+                                  {/* 第 3 行：VS */}
+                                  <div className="text-[10px] print:text-[8.5pt] font-black text-slate-400 my-1 print:my-0.5">
+                                    VS
+                                  </div>
+
+                                  {/* 第 4 行：隊伍 B 選手搭檔 */}
+                                  <div className="font-extrabold text-slate-900 text-xs sm:text-sm print:text-[10pt] leading-tight mb-1.5 print:mb-1">
+                                    {teamBStr}
+                                  </div>
+
+                                  {/* 第 5 行：裁判 */}
+                                  <div className="text-[11px] print:text-[8pt] text-slate-600 font-semibold flex items-center justify-center gap-1 pt-1 print:pt-0.5 border-t border-slate-200/60">
                                     <span className="text-slate-400">裁判：</span>
                                     {m.refereeSubstitution ? (
                                       <span className="text-indigo-900 font-bold">
@@ -4039,7 +4052,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                     </div>
 
                     {/* Page Footer */}
-                    <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-400">
+                    <div className="pt-2 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-400 print:hidden">
                       <span>義鼎杯羽球賽 · 3場地循環賽程表</span>
                       <span>第 {pageIdx + 1} 頁 / 共 {printPages.length} 頁</span>
                     </div>
@@ -4053,9 +4066,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           )}
 
-          {/* Printable Individual Score Leaderboard Table (By Score Brackets) */}
+          {/* Printable Individual Score Leaderboard Table (By Score Brackets) - Hidden on print so printed sheet is only schedule */}
           {courtSchedule && courtSchedule.rounds.length > 0 && (
-            <div className="pt-6 border-t-2 border-slate-900 space-y-4 print:break-before-page">
+            <div className="pt-6 border-t-2 border-slate-900 space-y-4 no-print">
               <div className="flex items-center justify-between">
                 <h3 className="font-black text-base text-slate-900">
                   🏆 選手個人勝場得分與獎金組別公告榜 (4分組、3分組、2分組、1分組、0分組)
