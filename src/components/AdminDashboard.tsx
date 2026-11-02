@@ -4557,28 +4557,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                 ) : (
                   <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
                     {referees.map((ref) => {
-                      // Check for rule conflicts in this round
+                      // Check for rule conflicts in this round & next round
                       const currentRound = refereeSubModalState.round;
-                      const isPlayingInCurrent =
-                        ref.isPlayer &&
-                        currentRound?.matches?.some(
-                          (m) =>
-                            (m.teamA && (m.teamA[0]?.id === ref.playerId || m.teamA[1]?.id === ref.playerId)) ||
-                            (m.teamB && (m.teamB[0]?.id === ref.playerId || m.teamB[1]?.id === ref.playerId))
-                        );
+                      const nextRoundNum = currentRound ? currentRound.roundNumber + 1 : 0;
+                      const nextRound = courtSchedule?.rounds?.find((r) => r.roundNumber === nextRoundNum);
 
+                      const isMatchPlayer = (m: CourtMatch, r: TournamentReferee) => {
+                        const targetIds = [r.playerId, r.id, r.id.replace(/^ref-player-/, '')].filter(Boolean);
+                        const matchPlayers = [...(m.teamA || []), ...(m.teamB || [])];
+                        return matchPlayers.some(
+                          (p) =>
+                            targetIds.includes(p.id) ||
+                            (p.name && r.name && p.name.trim().toLowerCase() === r.name.trim().toLowerCase())
+                        );
+                      };
+
+                      const isPlayingInCurrent =
+                        ref.isPlayer && currentRound?.matches?.some((m) => isMatchPlayer(m, ref));
+
+                      const isPlayingInNext =
+                        ref.isPlayer && nextRound?.matches?.some((m) => isMatchPlayer(m, ref));
+
+                      const isDisabled = Boolean(isPlayingInCurrent || isPlayingInNext);
                       const isChosen = refSubSelectedId === ref.id;
 
                       return (
                         <div
                           key={ref.id}
                           onClick={() => {
-                            if (isPlayingInCurrent) return;
+                            if (isDisabled) return;
                             setRefSubSelectedId(ref.id);
                             setRefSubCustomName('');
                           }}
                           className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-all ${
-                            isPlayingInCurrent
+                            isDisabled
                               ? 'bg-rose-50/60 border-rose-200 opacity-60 cursor-not-allowed'
                               : isChosen
                               ? 'bg-indigo-50 border-indigo-400 ring-1 ring-indigo-300 cursor-pointer'
@@ -4590,7 +4602,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                               type="radio"
                               name="selectedRefRadio"
                               checked={isChosen}
-                              disabled={isPlayingInCurrent}
+                              disabled={isDisabled}
                               onChange={() => {}}
                               className="text-indigo-600 focus:ring-indigo-500"
                             />
@@ -4609,6 +4621,10 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             {isPlayingInCurrent ? (
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">
                                 ⛔ 本輪在場比賽中
+                              </span>
+                            ) : isPlayingInNext ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300">
+                                ⛔ 下一輪要打球 (防延誤禁用)
                               </span>
                             ) : isChosen ? (
                               <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-600 text-white">

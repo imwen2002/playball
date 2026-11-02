@@ -539,21 +539,57 @@ export function assignRefereesToSchedule(
     return rounds;
   }
 
-  // Pre-compute players playing in each round
-  const playersPlayingInRound = rounds.map((round) => {
-    const playerIds = new Set<string>();
+  // Pre-compute players playing in each round with multi-field indexing (ID, Name, Email)
+  interface RoundPlayerIndex {
+    ids: Set<string>;
+    names: Set<string>;
+    emails: Set<string>;
+  }
+
+  const roundPlayerIndices: RoundPlayerIndex[] = rounds.map((round) => {
+    const ids = new Set<string>();
+    const names = new Set<string>();
+    const emails = new Set<string>();
+
     (round.matches || []).forEach((m) => {
-      if (m.teamA) {
-        if (m.teamA[0]?.id) playerIds.add(m.teamA[0].id);
-        if (m.teamA[1]?.id) playerIds.add(m.teamA[1].id);
-      }
-      if (m.teamB) {
-        if (m.teamB[0]?.id) playerIds.add(m.teamB[0].id);
-        if (m.teamB[1]?.id) playerIds.add(m.teamB[1].id);
-      }
+      const matchPlayers = [...(m.teamA || []), ...(m.teamB || [])];
+      matchPlayers.forEach((p) => {
+        if (!p) return;
+        if (p.id) ids.add(p.id.toLowerCase());
+        if (p.name) names.add(p.name.trim().toLowerCase());
+        if (p.email) emails.add(p.email.trim().toLowerCase());
+      });
     });
-    return playerIds;
+
+    return { ids, names, emails };
   });
+
+  // Helper: check if a referee is playing in a specific round
+  const isRefPlayingInRound = (ref: TournamentReferee, rIdx: number): boolean => {
+    if (!ref.isPlayer) return false;
+    if (rIdx < 0 || rIdx >= roundPlayerIndices.length) return false;
+
+    const roundIndex = roundPlayerIndices[rIdx];
+    const candidateIds = [
+      ref.playerId,
+      ref.id,
+      ref.id?.replace(/^ref-player-/, ''),
+    ].filter(Boolean) as string[];
+
+    for (const cid of candidateIds) {
+      if (roundIndex.ids.has(cid.toLowerCase())) return true;
+    }
+
+    if (ref.name && roundIndex.names.has(ref.name.trim().toLowerCase())) {
+      return true;
+    }
+
+    if (ref.email && roundIndex.emails.has(ref.email.trim().toLowerCase())) {
+      return true;
+    }
+
+    return false;
+  };
 
   // Track referee workload (number of matches refereed)
   const refereeWorkload = new Map<string, number>();
@@ -570,18 +606,25 @@ export function assignRefereesToSchedule(
       // Tier 1 (Strict Perfect):
       // - NOT assigned in this round
       // - NOT assigned in previous round (Rule 0: No back-to-back refereeing)
-      // - If player: satisfies Rule 1 (not playing in R), Rule 2 (did not play in R-1), Rule 3 (will not play in R+1)
+      // - If player:
+      //     - DOES NOT play in current round R (Rule 1)
+      //     - DID NOT play in previous round R-1 (Rule 2)
+      //     - WILL NOT play in next round R+1 (Rule 3 - Hard Absolute Prohibition!)
       const p1Candidates: TournamentReferee[] = [];
 
-      // Tier 2 (Guaranteed Non-consecutive refereeing, player has mild match proximity):
+      // Tier 2 (Non-consecutive refereeing, did not play in R, WILL NOT play in R+1, but played in R-1):
       // - NOT assigned in this round
-      // - NOT assigned in previous round (Rule 0: No back-to-back refereeing)
-      // - If player: satisfies Rule 1 (not playing in R)
+      // - NOT assigned in previous round (Rule 0)
+      // - If player:
+      //     - DOES NOT play in current round R
+      //     - WILL NOT play in next round R+1 (Hard Absolute Prohibition!)
       const p2Candidates: TournamentReferee[] = [];
 
       // Tier 3 (Only used as emergency fallback if total pool has < 6 referees):
       // - NOT assigned in this round
-      // - If player: satisfies Rule 1 (not playing in R)
+      // - If player:
+      //     - DOES NOT play in current round R
+      //     - WILL NOT play in next round R+1 (Hard Absolute Prohibition!)
       const p3Candidates: TournamentReferee[] = [];
 
       for (const ref of referees) {
@@ -592,7 +635,7 @@ export function assignRefereesToSchedule(
         const isRefFromPreviousRound = previousRoundAssigned.has(ref.id);
 
         if (!ref.isPlayer) {
-          // External referee: immune to player constraints
+          // External referee: immune to player match constraints
           if (!isRefFromPreviousRound) {
             p1Candidates.push(ref);
           } else {
@@ -601,28 +644,28 @@ export function assignRefereesToSchedule(
           continue;
         }
 
-        const pid = ref.playerId || ref.id;
-
-        // Rule 1: Cannot be playing in current round
-        const isPlayingInCurrentRound = playersPlayingInRound[rIdx]?.has(pid);
-        if (isPlayingInCurrentRound) {
-          continue; // Strict violation: cannot referee and play at the same time
+        // HARD CHECK 1: Cannot referee if playing in current round R!
+        if (isRefPlayingInRound(ref, rIdx)) {
+          continue; // Strict hard exclusion: cannot referee and play at the same time
         }
 
-        // Rule 2: Cannot have played in previous round (rIdx - 1)
-        const playedInPreviousRound = rIdx > 0 && playersPlayingInRound[rIdx - 1]?.has(pid);
+        // HARD CHECK 2: Cannot referee if playing in NEXT round R+1!
+        // This is the user's explicit rule: 下一輪要打球的選手，本輪絕對不可當裁判！
+        if (isRefPlayingInRound(ref, rIdx + 1)) {
+          continue; // Strict hard exclusion: must never referee before playing next round!
+        }
 
-        // Rule 3: Cannot play in next round (rIdx + 1)
-        const playsInNextRound = rIdx < rounds.length - 1 && playersPlayingInRound[rIdx + 1]?.has(pid);
+        // Check if player played in previous round R-1
+        const playedInPreviousRound = isRefPlayingInRound(ref, rIdx - 1);
 
         if (!isRefFromPreviousRound) {
-          if (!playedInPreviousRound && !playsInNextRound) {
+          if (!playedInPreviousRound) {
             p1Candidates.push(ref);
           } else {
             p2Candidates.push(ref);
           }
         } else {
-          // Back-to-back refereeing: only allowed if < 6 referees available
+          // Refereed in previous round: only allowed in Tier 3 if pool is < 6
           p3Candidates.push(ref);
         }
       }
@@ -635,8 +678,13 @@ export function assignRefereesToSchedule(
           : p3Candidates;
 
       if (candidatePool.length === 0) {
-        // No referee available
-        return match;
+        // No referee available without scheduling a player who plays next round!
+        // Leave unassigned so the player's next match schedule is protected!
+        return {
+          ...match,
+          refereeId: undefined,
+          refereeName: undefined,
+        };
       }
 
       // Sort by workload ascending (fewest matches first) with randomized tiebreaker
