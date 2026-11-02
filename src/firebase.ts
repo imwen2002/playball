@@ -129,7 +129,28 @@ export function subscribeToPlayers(
 }
 
 /**
- * Save or update player submission to Firestore
+ * Execute a promise with a hard timeout to avoid infinite exponential backoff loops in Firebase SDK
+ */
+export function withTimeout<T>(promise: Promise<T>, ms: number = 3500, timeoutErrorMsg: string = 'Network operation timed out'): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(timeoutErrorMsg));
+    }, ms);
+
+    promise
+      .then((val) => {
+        clearTimeout(timer);
+        resolve(val);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
+/**
+ * Save or update player submission to Firestore with fast timeout guard
  */
 export async function savePlayerSubmission(player: PlayerSubmission): Promise<void> {
   // Use a sanitized ID or email-based document ID
@@ -149,7 +170,7 @@ export async function savePlayerSubmission(player: PlayerSubmission): Promise<vo
   };
 
   try {
-    await setDoc(docRef, payload, { merge: true });
+    await withTimeout(setDoc(docRef, payload, { merge: true }), 3500, '儲存選手超時');
   } catch (err) {
     handleFirestoreError(err, OperationType.WRITE, `${PLAYERS_COLLECTION}/${docId}`);
   }
@@ -261,7 +282,46 @@ function sanitizeForFirestore(data: any): any {
 }
 
 /**
- * Save active tournament state to Firestore with auto-sanitization
+ * Lean schedule pruner to strip unnecessary nested fields and minimize Firestore write payload size
+ */
+function pruneScheduleForCloud(schedule: any): any {
+  if (!schedule || typeof schedule !== 'object') return null;
+  if (!Array.isArray(schedule.rounds)) return schedule;
+  return {
+    tierDivisions: (schedule.tierDivisions || []).map((td: any) => ({
+      tierLabel: td.tierLabel || '',
+      players: (td.players || []).map((p: any) => ({
+        id: p.id,
+        name: p.name,
+        level: p.level ?? 1,
+        gender: p.gender || 'male',
+        email: p.email || '',
+      })),
+    })),
+    rounds: schedule.rounds.map((r: any) => ({
+      roundNumber: r.roundNumber,
+      restingPlayers: (r.restingPlayers || []).map((p: any) => ({
+        id: p?.id || '',
+        name: p?.name || '',
+      })),
+      matches: (r.matches || []).map((m: any) => ({
+        id: m.id,
+        roundNumber: m.roundNumber,
+        courtNumber: m.courtNumber,
+        tierGroupLabel: m.tierGroupLabel || '',
+        teamA: (m.teamA || []).map((p: any) => ({ id: p?.id || '', name: p?.name || '', level: p?.level ?? 1 })),
+        teamB: (m.teamB || []).map((p: any) => ({ id: p?.id || '', name: p?.name || '', level: p?.level ?? 1 })),
+        refereeId: m.refereeId || null,
+        refereeName: m.refereeName || null,
+        refereeSubstitution: m.refereeSubstitution || null,
+        substitutions: m.substitutions || null,
+      })),
+    })),
+  };
+}
+
+/**
+ * Save active tournament state to Firestore with auto-sanitization and fast timeout
  */
 export async function saveTournamentState(
   courtSchedule: any | null,
@@ -270,20 +330,22 @@ export async function saveTournamentState(
 ): Promise<void> {
   const docRef = doc(db, TOURNAMENTS_COLLECTION, ACTIVE_TOURNAMENT_DOC);
   try {
+    const leanSchedule = pruneScheduleForCloud(courtSchedule);
     const payload = sanitizeForFirestore({
-      courtSchedule: courtSchedule ?? null,
+      courtSchedule: leanSchedule ?? null,
       matchScores: matchScores ?? {},
       referees: referees ?? [],
       updatedAt: new Date().toISOString(),
     });
-    await setDoc(docRef, payload, { merge: true });
+    // Fast 3.5s timeout prevents hanging when Firestore exponential backoff triggers
+    await withTimeout(setDoc(docRef, payload, { merge: true }), 3500, '雲端儲存逾時');
     console.log('[Firestore] Tournament state successfully autosaved to cloud:', {
       hasSchedule: Boolean(courtSchedule),
       scoreCount: Object.keys(matchScores || {}).length,
       refereeCount: referees?.length ?? 0,
     });
   } catch (err) {
-    console.error('[Firestore] Failed saving tournament state to cloud:', err);
+    console.warn('[Firestore] Failed saving tournament state to cloud (will fallback to local cache):', err);
     handleFirestoreError(err, OperationType.WRITE, `${TOURNAMENTS_COLLECTION}/${ACTIVE_TOURNAMENT_DOC}`);
   }
 }

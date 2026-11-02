@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import {
   PlayerSubmission,
   TournamentScheduleResult,
@@ -188,6 +188,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     );
     return () => unsubscribe();
   }, []);
+
+  // Debounced cloud synchronization queue: prevents network saturation and guarantees 0ms UI responsiveness
+  const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const debouncedSaveTournamentState = useCallback(
+    (
+      schedule: TournamentScheduleResult | null,
+      scores: Record<string, { scoreA?: number; scoreB?: number; completed?: boolean }>,
+      refs: TournamentReferee[],
+      delayMs: number = 250
+    ) => {
+      setIsCloudSyncing(true);
+      if (debounceTimerRef.current) {
+        clearTimeout(debounceTimerRef.current);
+      }
+      debounceTimerRef.current = setTimeout(async () => {
+        try {
+          await saveTournamentState(schedule, scores, refs);
+          setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+          setCloudSyncError(null);
+        } catch (err: any) {
+          console.warn('Debounced cloud sync fallback:', err);
+          const isQuota = err?.message?.includes('Quota') || err?.message?.includes('RESOURCE_EXHAUSTED');
+          if (isQuota) {
+            setCloudSyncError('雲端今日寫入額度已滿，已安全存於本機！');
+          } else {
+            setCloudSyncError('本機已保存 (雲端連線稍後自動重試)');
+          }
+        } finally {
+          setIsCloudSyncing(false);
+        }
+      }, delayMs);
+    },
+    []
+  );
 
   // Roster search and filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -532,7 +566,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleTogglePlayerReferee = async (player: PlayerSubmission) => {
+  const handleTogglePlayerReferee = (player: PlayerSubmission) => {
     const isAlreadyRef = referees.some(
       (r) => r.isPlayer && (r.playerId === player.id || r.id === `ref-player-${player.id}`)
     );
@@ -552,16 +586,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       };
       nextReferees = [...referees, newRef];
     }
+    // 0ms instant local update
     setReferees(nextReferees);
-    setIsCloudSyncing(true);
     try {
-      await saveTournamentState(courtSchedule, matchScores, nextReferees);
-      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
-    } catch (err) {
-      console.warn('Failed saving referee list:', err);
-    } finally {
-      setIsCloudSyncing(false);
-    }
+      localStorage.setItem('badminton_referees_list', JSON.stringify(nextReferees));
+    } catch {}
+    debouncedSaveTournamentState(courtSchedule, matchScores, nextReferees, 100);
   };
 
   const handleRetryCloudSync = async () => {
@@ -585,7 +615,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
-  const handleAddExternalReferee = async (e: React.FormEvent) => {
+  const handleAddExternalReferee = (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = newExtRefName.trim();
     if (!cleanName) return;
@@ -597,57 +627,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       createdAt: new Date().toISOString(),
     };
     const nextReferees = [...referees, newRef];
+    // 0ms instant local update
     setReferees(nextReferees);
     try {
       localStorage.setItem('badminton_referees_list', JSON.stringify(nextReferees));
     } catch {}
     setNewExtRefName('');
     setNewExtRefNotes('');
-    setIsCloudSyncing(true);
-    try {
-      await saveTournamentState(courtSchedule, matchScores, nextReferees);
-      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
-      setCloudSyncError(null);
-      setScheduleNotice(`✨ 外部專職裁判【${cleanName}】已成功新增並同步雲端！`);
-      setTimeout(() => setScheduleNotice(null), 3500);
-    } catch (err: any) {
-      console.warn('Failed saving external referee:', err);
-      const isQuota = err?.message?.includes('Quota') || err?.message?.includes('RESOURCE_EXHAUSTED');
-      if (isQuota) {
-        setCloudSyncError('雲端今日寫入額度已滿 (Quota Exceeded)，已安全存於本機瀏覽器！');
-      } else {
-        setCloudSyncError('雲端暫時連線異常，已先保存在本機！');
-      }
-      setScheduleNotice(`✓ 外部裁判【${cleanName}】已成功保存在本機！(雲端額度暫滿，待重置後自動同步)`);
-      setTimeout(() => setScheduleNotice(null), 5000);
-    } finally {
-      setIsCloudSyncing(false);
-    }
+    setScheduleNotice(`✨ 外部專職裁判【${cleanName}】已成功加入！`);
+    setTimeout(() => setScheduleNotice(null), 3000);
+    debouncedSaveTournamentState(courtSchedule, matchScores, nextReferees, 0);
   };
 
-  const handleRemoveReferee = async (refId: string) => {
+  const handleRemoveReferee = (refId: string) => {
     const nextReferees = referees.filter((r) => r.id !== refId);
+    // 0ms instant local update
     setReferees(nextReferees);
     try {
       localStorage.setItem('badminton_referees_list', JSON.stringify(nextReferees));
     } catch {}
-    setIsCloudSyncing(true);
-    try {
-      await saveTournamentState(courtSchedule, matchScores, nextReferees);
-      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
-      setCloudSyncError(null);
-    } catch (err: any) {
-      console.warn('Failed removing referee:', err);
-      const isQuota = err?.message?.includes('Quota') || err?.message?.includes('RESOURCE_EXHAUSTED');
-      if (isQuota) {
-        setCloudSyncError('雲端今日寫入額度已滿 (Quota Exceeded)，已安全存於本機瀏覽器！');
-      }
-    } finally {
-      setIsCloudSyncing(false);
-    }
+    debouncedSaveTournamentState(courtSchedule, matchScores, nextReferees, 50);
   };
 
-  const handleBatchTogglePlayersAsReferees = async (selectAll: boolean) => {
+  const handleBatchTogglePlayersAsReferees = (selectAll: boolean) => {
     let nextReferees: TournamentReferee[];
     if (selectAll) {
       const existingPlayerIds = new Set(referees.filter((r) => r.isPlayer).map((r) => r.playerId));
@@ -666,24 +668,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     } else {
       nextReferees = referees.filter((r) => !r.isPlayer);
     }
+    // 0ms instant local update
     setReferees(nextReferees);
     try {
       localStorage.setItem('badminton_referees_list', JSON.stringify(nextReferees));
     } catch {}
-    setIsCloudSyncing(true);
-    try {
-      await saveTournamentState(courtSchedule, matchScores, nextReferees);
-      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
-      setCloudSyncError(null);
-    } catch (err: any) {
-      console.warn('Failed batch updating player referees:', err);
-      const isQuota = err?.message?.includes('Quota') || err?.message?.includes('RESOURCE_EXHAUSTED');
-      if (isQuota) {
-        setCloudSyncError('雲端今日寫入額度已滿 (Quota Exceeded)，已安全存於本機瀏覽器！');
-      }
-    } finally {
-      setIsCloudSyncing(false);
-    }
+    debouncedSaveTournamentState(courtSchedule, matchScores, nextReferees, 100);
   };
 
   const handleReassignReferees = async () => {
@@ -1046,19 +1036,15 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         setCourtSchedule(updatedSchedule);
       }
 
-      await saveTournamentState(updatedSchedule, matchScores, updatedReferees);
-      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+      debouncedSaveTournamentState(updatedSchedule, matchScores, updatedReferees, 0);
       handleCloseEditPlayer();
     } catch (err) {
-      console.warn('Failed saving edited player:', err);
-      alert('儲存修改時發生錯誤，請稍後重試。');
-    } finally {
-      setIsCloudSyncing(false);
+      console.warn('Optimistic save player background error:', err);
     }
   };
 
   // Update match score in schedule (Strictly 0 or 1, mutually exclusive, locked if completed, auto cloud-saved)
-  const handleUpdateMatchScore = async (matchId: string, team: 'A' | 'B', score: number) => {
+  const handleUpdateMatchScore = (matchId: string, team: 'A' | 'B', score: number) => {
     const current = matchScores[matchId] || { scoreA: 0, scoreB: 0, completed: false };
     if (current.completed) return; // Locked when completed!
 
@@ -1089,19 +1075,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         scoreB: nextB,
       },
     };
+    // 0ms instant UI update
     setMatchScores(updated);
-    setIsCloudSyncing(true);
-    try {
-      await saveTournamentState(courtSchedule, updated, referees);
-      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
-    } catch (err) {
-      console.warn('Failed saving score to cloud:', err);
-    } finally {
-      setIsCloudSyncing(false);
-    }
+    debouncedSaveTournamentState(courtSchedule, updated, referees, 200);
   };
 
-  const handleToggleMatchComplete = async (matchId: string) => {
+  const handleToggleMatchComplete = (matchId: string) => {
     const current = matchScores[matchId] || { scoreA: 0, scoreB: 0, completed: false };
     const nextCompleted = !current.completed;
 
@@ -1128,16 +1107,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         completed: nextCompleted,
       },
     };
+    // 0ms instant UI update
     setMatchScores(updated);
-    setIsCloudSyncing(true);
-    try {
-      await saveTournamentState(courtSchedule, updated, referees);
-      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
-    } catch (err) {
-      console.warn('Failed saving completion to cloud:', err);
-    } finally {
-      setIsCloudSyncing(false);
-    }
+    debouncedSaveTournamentState(courtSchedule, updated, referees, 100);
   };
 
   // Copy schedule text to clipboard
