@@ -144,6 +144,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Cloud realtime sync status
   const [lastCloudSyncTime, setLastCloudSyncTime] = useState<string | null>(null);
   const [isCloudSyncing, setIsCloudSyncing] = useState<boolean>(false);
+  const [cloudSyncError, setCloudSyncError] = useState<string | null>(null);
   const [scheduleNotice, setScheduleNotice] = useState<string | null>(null);
 
   // Score bracket filter: 'all' | 4 | 3 | 2 | 1 | 0
@@ -161,7 +162,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             setMatchScores(cloudState.matchScores);
           }
           if (cloudState.referees && Array.isArray(cloudState.referees)) {
-            setReferees(cloudState.referees);
+            const cloudRefs = cloudState.referees as TournamentReferee[];
+            setReferees((current) => {
+              // Anti-overwrite protection: preserve any local external referees created offline or pending sync
+              const cloudIds = new Set(cloudRefs.map((r) => r.id));
+              const missingExternal = current.filter((r) => !r.isPlayer && !cloudIds.has(r.id));
+              if (missingExternal.length > 0) {
+                const merged: TournamentReferee[] = [...cloudRefs, ...missingExternal];
+                try {
+                  localStorage.setItem('badminton_referees_list', JSON.stringify(merged));
+                } catch {}
+                return merged;
+              }
+              return cloudRefs;
+            });
           }
           if (cloudState.updatedAt) {
             setLastCloudSyncTime(new Date(cloudState.updatedAt).toLocaleTimeString('zh-TW'));
@@ -550,6 +564,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     }
   };
 
+  const handleRetryCloudSync = async () => {
+    setIsCloudSyncing(true);
+    setCloudSyncError(null);
+    try {
+      await saveTournamentState(courtSchedule, matchScores, referees);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+      setScheduleNotice('✨ 雲端同步成功！裁判名單與賽程已全數寫入雲端。');
+      setTimeout(() => setScheduleNotice(null), 3500);
+    } catch (err: any) {
+      console.warn('Retry sync error:', err);
+      const isQuota = err?.message?.includes('Quota') || err?.message?.includes('RESOURCE_EXHAUSTED');
+      if (isQuota) {
+        setCloudSyncError('雲端今日寫入額度已滿 (Quota Exceeded)，已安全存於本機瀏覽器！');
+      } else {
+        setCloudSyncError('雲端連線失敗，已先安全保存在本機！');
+      }
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
   const handleAddExternalReferee = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanName = newExtRefName.trim();
@@ -558,19 +593,33 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       id: `ref-ext-${Date.now()}`,
       name: cleanName,
       isPlayer: false,
-      notes: newExtRefNotes.trim(),
+      notes: newExtRefNotes.trim() || '',
       createdAt: new Date().toISOString(),
     };
     const nextReferees = [...referees, newRef];
     setReferees(nextReferees);
+    try {
+      localStorage.setItem('badminton_referees_list', JSON.stringify(nextReferees));
+    } catch {}
     setNewExtRefName('');
     setNewExtRefNotes('');
     setIsCloudSyncing(true);
     try {
       await saveTournamentState(courtSchedule, matchScores, nextReferees);
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
-    } catch (err) {
+      setCloudSyncError(null);
+      setScheduleNotice(`✨ 外部專職裁判【${cleanName}】已成功新增並同步雲端！`);
+      setTimeout(() => setScheduleNotice(null), 3500);
+    } catch (err: any) {
       console.warn('Failed saving external referee:', err);
+      const isQuota = err?.message?.includes('Quota') || err?.message?.includes('RESOURCE_EXHAUSTED');
+      if (isQuota) {
+        setCloudSyncError('雲端今日寫入額度已滿 (Quota Exceeded)，已安全存於本機瀏覽器！');
+      } else {
+        setCloudSyncError('雲端暫時連線異常，已先保存在本機！');
+      }
+      setScheduleNotice(`✓ 外部裁判【${cleanName}】已成功保存在本機！(雲端額度暫滿，待重置後自動同步)`);
+      setTimeout(() => setScheduleNotice(null), 5000);
     } finally {
       setIsCloudSyncing(false);
     }
@@ -579,12 +628,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   const handleRemoveReferee = async (refId: string) => {
     const nextReferees = referees.filter((r) => r.id !== refId);
     setReferees(nextReferees);
+    try {
+      localStorage.setItem('badminton_referees_list', JSON.stringify(nextReferees));
+    } catch {}
     setIsCloudSyncing(true);
     try {
       await saveTournamentState(courtSchedule, matchScores, nextReferees);
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
-    } catch (err) {
+      setCloudSyncError(null);
+    } catch (err: any) {
       console.warn('Failed removing referee:', err);
+      const isQuota = err?.message?.includes('Quota') || err?.message?.includes('RESOURCE_EXHAUSTED');
+      if (isQuota) {
+        setCloudSyncError('雲端今日寫入額度已滿 (Quota Exceeded)，已安全存於本機瀏覽器！');
+      }
     } finally {
       setIsCloudSyncing(false);
     }
@@ -610,12 +667,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       nextReferees = referees.filter((r) => !r.isPlayer);
     }
     setReferees(nextReferees);
+    try {
+      localStorage.setItem('badminton_referees_list', JSON.stringify(nextReferees));
+    } catch {}
     setIsCloudSyncing(true);
     try {
       await saveTournamentState(courtSchedule, matchScores, nextReferees);
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
-    } catch (err) {
+      setCloudSyncError(null);
+    } catch (err: any) {
       console.warn('Failed batch updating player referees:', err);
+      const isQuota = err?.message?.includes('Quota') || err?.message?.includes('RESOURCE_EXHAUSTED');
+      if (isQuota) {
+        setCloudSyncError('雲端今日寫入額度已滿 (Quota Exceeded)，已安全存於本機瀏覽器！');
+      }
     } finally {
       setIsCloudSyncing(false);
     }
@@ -1422,13 +1487,30 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {/* Top Right Action: Cloud Sync Status & Public Share Button / Lock Admin */}
           <div className="flex items-center gap-2 flex-wrap shrink-0 self-start md:self-auto">
-            <div className="px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/90 text-emerald-900 text-xs font-semibold flex items-center gap-1.5 shadow-2xs">
-              <span className={`w-2 h-2 rounded-full ${isCloudSyncing ? 'bg-amber-500 animate-ping' : 'bg-emerald-500 animate-pulse'}`} />
-              <span>{isCloudSyncing ? '雲端同步中...' : '雲端連線即時同步'}</span>
-              <span className="text-[11px] text-emerald-700 font-normal">
-                {lastCloudSyncTime ? `(${lastCloudSyncTime})` : '(跨裝置已連線)'}
-              </span>
-            </div>
+            {cloudSyncError ? (
+              <div
+                title="雲端每日免費寫入額度已滿，名單與賽程已安全保存在本機快取；明日額度重置後將自動同步，您亦可隨時手動重試"
+                className="px-3 py-1.5 rounded-xl border border-amber-300 bg-amber-50 text-amber-900 text-xs font-semibold flex items-center gap-1.5 shadow-2xs"
+              >
+                <span className="w-2 h-2 rounded-full bg-amber-500 animate-pulse" />
+                <span>本機已保存 (雲端額度暫滿)</span>
+                <button
+                  type="button"
+                  onClick={handleRetryCloudSync}
+                  className="ml-1 text-[11px] underline text-amber-800 hover:text-amber-950 font-bold cursor-pointer"
+                >
+                  重試同步
+                </button>
+              </div>
+            ) : (
+              <div className="px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/90 text-emerald-900 text-xs font-semibold flex items-center gap-1.5 shadow-2xs">
+                <span className={`w-2 h-2 rounded-full ${isCloudSyncing ? 'bg-amber-500 animate-ping' : 'bg-emerald-500 animate-pulse'}`} />
+                <span>{isCloudSyncing ? '雲端同步中...' : '雲端連線即時同步'}</span>
+                <span className="text-[11px] text-emerald-700 font-normal">
+                  {lastCloudSyncTime ? `(${lastCloudSyncTime})` : '(跨裝置已連線)'}
+                </span>
+              </div>
+            )}
 
             {!isPublicView && onLockAdmin && (
               <button
@@ -2018,9 +2100,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                     </span>
                                   )}
                                 </div>
-                                <span className="text-[11px] text-slate-500 font-medium truncate max-w-[160px]">
-                                  {formatCleanTierGroupLabel(match.tierGroupLabel)}
-                                </span>
                               </div>
 
                               {/* Versus Battle Block */}
@@ -3026,11 +3105,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             <span className="font-black text-base text-slate-900">
                               {stat.player.name}
                             </span>
-                            <span
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold ${tier.colorClass.badge}`}
-                            >
-                              {tier.name}
-                            </span>
                             {stat.hasAnySubstitution && (
                               <span className="text-[10px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full flex items-center gap-1 shadow-2xs">
                                 <span>⚠️ 含代打場次</span>
@@ -4018,9 +4092,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   key={m.id}
                                   className="p-2 sm:p-2.5 print:p-1.5 bg-slate-50/80 rounded-xl border border-slate-300 text-center flex flex-col justify-between"
                                 >
-                                  {/* 第 1 行：場地與組別 */}
+                                  {/* 第 1 行：場地編號 */}
                                   <div className="font-bold text-slate-800 text-xs sm:text-sm print:text-[9.5pt] leading-tight">
-                                    場地 {m.courtNumber} {cleanGroup ? (cleanGroup.startsWith('【') ? cleanGroup : `【${cleanGroup}】`) : ''}
+                                    場地 {m.courtNumber}
                                   </div>
 
                                   {/* 第 2 行：隊伍 A 選手搭檔 */}
