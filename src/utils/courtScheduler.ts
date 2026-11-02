@@ -21,6 +21,7 @@ import {
   ScheduleRound,
   TournamentScheduleResult,
   PlayerScheduleStat,
+  TournamentReferee,
 } from '../types';
 import { BADMINTON_TIERS, getTierByLevel } from '../data/badmintonTiers';
 
@@ -519,16 +520,131 @@ export function compilePlayerScheduleStats(
 }
 
 /**
+ * Assigns referees from the referee pool to each match across all rounds,
+ * strictly abiding by the 3 referee delay-prevention rules:
+ * Rule 1: A player referee CANNOT be playing in the same round (neither team A nor team B on any court).
+ * Rule 2: A player referee who played in round R-1 CANNOT referee in round R (avoids delays from previous match).
+ * Rule 3: A player referee who referees in round R CANNOT play in round R+1 (avoids referee duties delaying next match).
+ * Non-player external referees are not playing, so they are free from playing collision rules.
+ * Referees are randomly distributed with balanced workloads across rounds.
+ */
+export function assignRefereesToSchedule(
+  rounds: ScheduleRound[],
+  referees: TournamentReferee[],
+  randomize: boolean = true
+): ScheduleRound[] {
+  if (!referees || referees.length === 0 || !rounds || rounds.length === 0) {
+    return rounds;
+  }
+
+  // Pre-compute players playing in each round
+  const playersPlayingInRound = rounds.map((round) => {
+    const playerIds = new Set<string>();
+    (round.matches || []).forEach((m) => {
+      if (m.teamA) {
+        if (m.teamA[0]?.id) playerIds.add(m.teamA[0].id);
+        if (m.teamA[1]?.id) playerIds.add(m.teamA[1].id);
+      }
+      if (m.teamB) {
+        if (m.teamB[0]?.id) playerIds.add(m.teamB[0].id);
+        if (m.teamB[1]?.id) playerIds.add(m.teamB[1].id);
+      }
+    });
+    return playerIds;
+  });
+
+  // Track referee workload (number of matches refereed)
+  const refereeWorkload = new Map<string, number>();
+  referees.forEach((ref) => refereeWorkload.set(ref.id, 0));
+
+  return rounds.map((round, rIdx) => {
+    const refereesAssignedInThisRound = new Set<string>();
+
+    const updatedMatches = (round.matches || []).map((match) => {
+      // Find eligible referee candidates for this match
+      // Priority 1 (Strict): Satisfies Rule 1, Rule 2, Rule 3, and not already assigned in this round
+      // Priority 2 (Fallback): Satisfies Rule 1 (absolutely not playing in this round), not already assigned
+      const p1Candidates: TournamentReferee[] = [];
+      const p2Candidates: TournamentReferee[] = [];
+
+      for (const ref of referees) {
+        if (refereesAssignedInThisRound.has(ref.id)) {
+          continue; // Cannot referee two courts in the exact same round
+        }
+
+        if (!ref.isPlayer) {
+          // External referee: immune to player scheduling constraints
+          p1Candidates.push(ref);
+          continue;
+        }
+
+        const pid = ref.playerId || ref.id;
+
+        // Rule 1: Cannot be playing in current round
+        const isPlayingInCurrentRound = playersPlayingInRound[rIdx]?.has(pid);
+        if (isPlayingInCurrentRound) {
+          continue; // Strict violation of Rule 1
+        }
+
+        // Rule 2: Cannot have played in previous round (rIdx - 1)
+        const playedInPreviousRound = rIdx > 0 && playersPlayingInRound[rIdx - 1]?.has(pid);
+
+        // Rule 3: Cannot play in next round (rIdx + 1)
+        const playsInNextRound = rIdx < rounds.length - 1 && playersPlayingInRound[rIdx + 1]?.has(pid);
+
+        if (!playedInPreviousRound && !playsInNextRound) {
+          p1Candidates.push(ref);
+        } else {
+          // Only Rule 1 satisfied (not playing in current round)
+          p2Candidates.push(ref);
+        }
+      }
+
+      const candidatePool = p1Candidates.length > 0 ? p1Candidates : p2Candidates;
+
+      if (candidatePool.length === 0) {
+        // No referee available
+        return match;
+      }
+
+      // Sort by workload ascending (fewest matches first) with randomized tiebreaker
+      const sortedPool = [...candidatePool].sort((a, b) => {
+        const countA = refereeWorkload.get(a.id) ?? 0;
+        const countB = refereeWorkload.get(b.id) ?? 0;
+        if (countA !== countB) return countA - countB;
+        return randomize ? Math.random() - 0.5 : 0;
+      });
+
+      const chosenRef = sortedPool[0];
+      refereesAssignedInThisRound.add(chosenRef.id);
+      refereeWorkload.set(chosenRef.id, (refereeWorkload.get(chosenRef.id) ?? 0) + 1);
+
+      return {
+        ...match,
+        refereeId: chosenRef.id,
+        refereeName: chosenRef.name,
+      };
+    });
+
+    return {
+      ...round,
+      matches: updatedMatches,
+    };
+  });
+}
+
+/**
  * Master generator: generates full 3-court tournament schedule with 4 matches per player.
  * Strictly enforces 5 players per division and rest interval rules.
- * Accepts options { previousFingerprint, randomize } to guarantee that each AI draw
- * produces a completely distinct matchup combination from the previous generation.
+ * Accepts options { previousFingerprint, randomize, referees } to guarantee that each AI draw
+ * produces a completely distinct matchup combination and assigns referees abiding by rules.
  */
 export function generateFourMatchCourtSchedule(
   players: PlayerSubmission[],
   options?: {
     previousFingerprint?: string;
     randomize?: boolean;
+    referees?: TournamentReferee[];
   }
 ): TournamentScheduleResult {
   const validation = validateFivePlayerRule(players);
@@ -565,7 +681,12 @@ export function generateFourMatchCourtSchedule(
     });
 
     // 3. Assign matches to 3 Courts across conflict-free rounds with mandatory rest intervals
-    const rounds = scheduleMatchesToCourts(divisionMatchesMap, players, shouldRandomize);
+    let rounds = scheduleMatchesToCourts(divisionMatchesMap, players, shouldRandomize);
+
+    // 4. Assign referees if referee pool provided, abiding by the 3 anti-delay rules
+    if (options?.referees && options.referees.length > 0) {
+      rounds = assignRefereesToSchedule(rounds, options.referees, shouldRandomize);
+    }
 
     const scheduleResult: TournamentScheduleResult = {
       rounds,

@@ -217,6 +217,7 @@ const ACTIVE_TOURNAMENT_DOC = 'active';
 export interface TournamentCloudState {
   courtSchedule: any | null;
   matchScores: Record<string, { scoreA?: number; scoreB?: number; completed?: boolean }>;
+  referees?: any[];
   updatedAt: string;
 }
 
@@ -236,6 +237,7 @@ export function subscribeToTournamentState(
         onUpdate({
           courtSchedule: data.courtSchedule ?? null,
           matchScores: data.matchScores ?? {},
+          referees: data.referees ?? [],
           updatedAt: data.updatedAt ?? new Date().toISOString(),
         });
       } else {
@@ -263,19 +265,22 @@ function sanitizeForFirestore(data: any): any {
  */
 export async function saveTournamentState(
   courtSchedule: any | null,
-  matchScores: Record<string, { scoreA?: number; scoreB?: number; completed?: boolean }>
+  matchScores: Record<string, { scoreA?: number; scoreB?: number; completed?: boolean }>,
+  referees?: any[]
 ): Promise<void> {
   const docRef = doc(db, TOURNAMENTS_COLLECTION, ACTIVE_TOURNAMENT_DOC);
   try {
     const payload = sanitizeForFirestore({
       courtSchedule: courtSchedule ?? null,
       matchScores: matchScores ?? {},
+      referees: referees ?? [],
       updatedAt: new Date().toISOString(),
     });
     await setDoc(docRef, payload, { merge: true });
     console.log('[Firestore] Tournament state successfully autosaved to cloud:', {
       hasSchedule: Boolean(courtSchedule),
       scoreCount: Object.keys(matchScores || {}).length,
+      refereeCount: referees?.length ?? 0,
     });
   } catch (err) {
     console.error('[Firestore] Failed saving tournament state to cloud:', err);

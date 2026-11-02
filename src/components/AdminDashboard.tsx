@@ -5,6 +5,8 @@ import {
   CourtMatch,
   ScheduleRound,
   MatchSubstitutionRecord,
+  TournamentReferee,
+  RefereeSubstitutionRecord,
 } from '../types';
 import { BADMINTON_TIERS, getTierByLevel } from '../data/badmintonTiers';
 import { SAMPLE_PLAYERS } from '../data/samplePlayers';
@@ -13,6 +15,7 @@ import {
   generateFourMatchCourtSchedule,
   validateFivePlayerRule,
   computeScheduleFingerprint,
+  assignRefereesToSchedule,
   FivePlayerValidationResult,
 } from '../utils/courtScheduler';
 import { subscribeToTournamentState, saveTournamentState } from '../firebase';
@@ -28,6 +31,7 @@ import {
   Award,
   Sparkles,
   Shield,
+  ShieldCheck,
   Sliders,
   Layers,
   ArrowUpDown,
@@ -51,6 +55,8 @@ import {
   Activity,
   X,
   Share2,
+  CheckSquare,
+  Square,
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -76,11 +82,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   onBatchDeleteSamplePlayers,
   isPublicView = false,
 }) => {
-  // Navigation inside Admin: 'schedule' (3-Court) | 'scores' (Prize leaderboard) | 'roster' | 'print'
-  const [activeAdminTab, setActiveAdminTab] = useState<'schedule' | 'scores' | 'roster' | 'print'>('schedule');
+  // Navigation inside Admin: 'schedule' (3-Court) | 'scores' (Prize leaderboard) | 'roster' | 'referees' | 'print'
+  const [activeAdminTab, setActiveAdminTab] = useState<'schedule' | 'scores' | 'roster' | 'referees' | 'print'>('schedule');
 
   // Layout view toggle in Roster ('table' = 條列式清單 | 'cards' = 卡片)
   const [rosterViewMode, setRosterViewMode] = useState<'table' | 'cards'>('table');
+
+  // Referees list state (TournamentReferee[])
+  const [referees, setReferees] = useState<TournamentReferee[]>(() => {
+    try {
+      const saved = localStorage.getItem('badminton_referees_list');
+      if (saved) return JSON.parse(saved);
+    } catch {
+      // ignore
+    }
+    return [];
+  });
+
+  // Keep referees synced to localStorage
+  useEffect(() => {
+    try {
+      localStorage.setItem('badminton_referees_list', JSON.stringify(referees));
+    } catch {
+      // ignore
+    }
+  }, [referees]);
 
   // 3-Court Schedule state (strictly requires 5-player multiple)
   const [courtSchedule, setCourtSchedule] = useState<TournamentScheduleResult | null>(() => {
@@ -116,7 +142,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Score bracket filter: 'all' | 4 | 3 | 2 | 1 | 0
   const [selectedScoreBracket, setSelectedScoreBracket] = useState<'all' | number>('all');
 
-  // Realtime subscription to tournament cloud state (schedule, scores, completion)
+  // Realtime subscription to tournament cloud state (schedule, scores, completion, referees)
   useEffect(() => {
     const unsubscribe = subscribeToTournamentState(
       (cloudState) => {
@@ -126,6 +152,9 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           }
           if (cloudState.matchScores) {
             setMatchScores(cloudState.matchScores);
+          }
+          if (cloudState.referees && Array.isArray(cloudState.referees)) {
+            setReferees(cloudState.referees);
           }
           if (cloudState.updatedAt) {
             setLastCloudSyncTime(new Date(cloudState.updatedAt).toLocaleTimeString('zh-TW'));
@@ -303,7 +332,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTimeout(() => setScheduleNotice(null), 4500);
 
     try {
-      await saveTournamentState(updatedSchedule, matchScores);
+      await saveTournamentState(updatedSchedule, matchScores, referees);
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
     } catch (err) {
       console.warn('Failed saving substitution to cloud:', err);
@@ -346,10 +375,263 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setTimeout(() => setScheduleNotice(null), 4000);
 
     try {
-      await saveTournamentState(updatedSchedule, matchScores);
+      await saveTournamentState(updatedSchedule, matchScores, referees);
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
     } catch (err) {
       console.warn('Failed saving substitution revert to cloud:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  // Referee Substitution Modal State
+  const [refereeSubModalState, setRefereeSubModalState] = useState<{
+    isOpen: boolean;
+    match: CourtMatch | null;
+    round: ScheduleRound | null;
+  }>({
+    isOpen: false,
+    match: null,
+    round: null,
+  });
+  const [refSubSelectedId, setRefSubSelectedId] = useState<string>('');
+  const [refSubCustomName, setRefSubCustomName] = useState<string>('');
+  const [refSubReason, setRefSubReason] = useState<string>('臨時公務交接');
+
+  // External referee input in Referees Tab
+  const [newExtRefName, setNewExtRefName] = useState<string>('');
+  const [newExtRefNotes, setNewExtRefNotes] = useState<string>('');
+  const [refereeSearchQuery, setRefereeSearchQuery] = useState<string>('');
+
+  const handleOpenRefereeSubModal = (match: CourtMatch, round: ScheduleRound) => {
+    setRefereeSubModalState({
+      isOpen: true,
+      match,
+      round,
+    });
+    setRefSubSelectedId(match.refereeSubstitution?.substituteRefereeId || match.refereeId || '');
+    setRefSubCustomName(match.refereeSubstitution?.substituteRefereeName || '');
+    setRefSubReason(match.refereeSubstitution?.reason || '臨時公務交接');
+  };
+
+  const handleCloseRefereeSubModal = () => {
+    setRefereeSubModalState({
+      isOpen: false,
+      match: null,
+      round: null,
+    });
+  };
+
+  const handleApplyRefereeSub = async () => {
+    if (!courtSchedule || !refereeSubModalState.match || !refereeSubModalState.round) return;
+
+    let subName = refSubCustomName.trim();
+    let subId = refSubSelectedId;
+    let isExternal = true;
+
+    if (refSubSelectedId) {
+      const selectedRef = referees.find((r) => r.id === refSubSelectedId);
+      if (selectedRef) {
+        subName = selectedRef.name;
+        isExternal = !selectedRef.isPlayer;
+      }
+    }
+
+    if (!subName) {
+      alert('請選擇裁判或輸入更換後的裁判姓名！');
+      return;
+    }
+
+    const currentMatchId = refereeSubModalState.match.id;
+    const subRecord: RefereeSubstitutionRecord = {
+      originalRefereeId: refereeSubModalState.match.refereeId,
+      originalRefereeName: refereeSubModalState.match.refereeName || '原排定裁判',
+      substituteRefereeId: subId || undefined,
+      substituteRefereeName: subName,
+      isExternal,
+      reason: refSubReason,
+      timestamp: new Date().toISOString(),
+    };
+
+    const updatedSchedule: TournamentScheduleResult = JSON.parse(JSON.stringify(courtSchedule));
+    updatedSchedule.rounds.forEach((round) => {
+      (round.matches || []).forEach((m) => {
+        if (m.id === currentMatchId) {
+          m.refereeSubstitution = subRecord;
+        }
+      });
+    });
+
+    setCourtSchedule(updatedSchedule);
+    handleCloseRefereeSubModal();
+    setIsCloudSyncing(true);
+    setScheduleNotice(`✨ 已成功更換此場裁判為【${subName}】，已即時同步雲端！`);
+    setTimeout(() => setScheduleNotice(null), 4000);
+
+    try {
+      await saveTournamentState(updatedSchedule, matchScores, referees);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed saving referee sub to cloud:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleResetRefereeSub = async () => {
+    if (!courtSchedule || !refereeSubModalState.match) return;
+    const currentMatchId = refereeSubModalState.match.id;
+    const updatedSchedule: TournamentScheduleResult = JSON.parse(JSON.stringify(courtSchedule));
+    updatedSchedule.rounds.forEach((round) => {
+      (round.matches || []).forEach((m) => {
+        if (m.id === currentMatchId) {
+          delete m.refereeSubstitution;
+        }
+      });
+    });
+
+    setCourtSchedule(updatedSchedule);
+    handleCloseRefereeSubModal();
+    setIsCloudSyncing(true);
+    setScheduleNotice('✨ 已恢復此場原排定裁判');
+    setTimeout(() => setScheduleNotice(null), 3000);
+
+    try {
+      await saveTournamentState(updatedSchedule, matchScores, referees);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed resetting referee sub to cloud:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleTogglePlayerReferee = async (player: PlayerSubmission) => {
+    const isAlreadyRef = referees.some(
+      (r) => r.isPlayer && (r.playerId === player.id || r.id === `ref-player-${player.id}`)
+    );
+    let nextReferees: TournamentReferee[];
+    if (isAlreadyRef) {
+      nextReferees = referees.filter(
+        (r) => !(r.isPlayer && (r.playerId === player.id || r.id === `ref-player-${player.id}`))
+      );
+    } else {
+      const newRef: TournamentReferee = {
+        id: `ref-player-${player.id}`,
+        name: player.name,
+        isPlayer: true,
+        playerId: player.id,
+        email: player.email,
+        createdAt: new Date().toISOString(),
+      };
+      nextReferees = [...referees, newRef];
+    }
+    setReferees(nextReferees);
+    setIsCloudSyncing(true);
+    try {
+      await saveTournamentState(courtSchedule, matchScores, nextReferees);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed saving referee list:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleAddExternalReferee = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanName = newExtRefName.trim();
+    if (!cleanName) return;
+    const newRef: TournamentReferee = {
+      id: `ref-ext-${Date.now()}`,
+      name: cleanName,
+      isPlayer: false,
+      notes: newExtRefNotes.trim(),
+      createdAt: new Date().toISOString(),
+    };
+    const nextReferees = [...referees, newRef];
+    setReferees(nextReferees);
+    setNewExtRefName('');
+    setNewExtRefNotes('');
+    setIsCloudSyncing(true);
+    try {
+      await saveTournamentState(courtSchedule, matchScores, nextReferees);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed saving external referee:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleRemoveReferee = async (refId: string) => {
+    const nextReferees = referees.filter((r) => r.id !== refId);
+    setReferees(nextReferees);
+    setIsCloudSyncing(true);
+    try {
+      await saveTournamentState(courtSchedule, matchScores, nextReferees);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed removing referee:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleBatchTogglePlayersAsReferees = async (selectAll: boolean) => {
+    let nextReferees: TournamentReferee[];
+    if (selectAll) {
+      const existingPlayerIds = new Set(referees.filter((r) => r.isPlayer).map((r) => r.playerId));
+      const externalOnly = referees.filter((r) => !r.isPlayer);
+      const newPlayerRefs: TournamentReferee[] = players
+        .filter((p) => !existingPlayerIds.has(p.id))
+        .map((p) => ({
+          id: `ref-player-${p.id}`,
+          name: p.name,
+          isPlayer: true,
+          playerId: p.id,
+          email: p.email,
+          createdAt: new Date().toISOString(),
+        }));
+      nextReferees = [...externalOnly, ...referees.filter((r) => r.isPlayer), ...newPlayerRefs];
+    } else {
+      nextReferees = referees.filter((r) => !r.isPlayer);
+    }
+    setReferees(nextReferees);
+    setIsCloudSyncing(true);
+    try {
+      await saveTournamentState(courtSchedule, matchScores, nextReferees);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed batch updating player referees:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
+
+  const handleReassignReferees = async () => {
+    if (!courtSchedule || !courtSchedule.rounds || courtSchedule.rounds.length === 0) {
+      alert('目前尚未排定賽程，請先在「3 場地循環排程表」點選排程！');
+      return;
+    }
+    if (referees.length === 0) {
+      alert('目前裁判名單尚無人員！請先在下方挑選選手或新增專職裁判。');
+      return;
+    }
+    const updatedRounds = assignRefereesToSchedule(courtSchedule.rounds, referees, true);
+    const updatedSchedule: TournamentScheduleResult = {
+      ...courtSchedule,
+      rounds: updatedRounds,
+    };
+    setCourtSchedule(updatedSchedule);
+    setIsCloudSyncing(true);
+    setScheduleNotice('✨ 已依最新裁判名單（嚴格遵守 3 大防延誤規定）為全場次重新隨機排定裁判！');
+    setTimeout(() => setScheduleNotice(null), 4500);
+    try {
+      await saveTournamentState(updatedSchedule, matchScores, referees);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed saving reassigned referees to cloud:', err);
     } finally {
       setIsCloudSyncing(false);
     }
@@ -404,6 +686,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Execute 3-court schedule generation (Strict 5-player rule: 4 matches, zero duplicate partners)
   // AI Random Draw: Mathematically guarantees that each regeneration produces a completely distinct matchup combination
+  // and randomly schedules referees adhering strictly to the 3 delay-prevention rules!
   const handleGenerateCourtSchedule = async () => {
     const validation = validateFivePlayerRule(players);
     if (!validation.isValid) {
@@ -429,17 +712,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     const result = generateFourMatchCourtSchedule(players, {
       previousFingerprint: prevFingerprint,
       randomize: true,
+      referees: referees,
     });
 
     setCourtSchedule(result);
     setMatchScores({});
     setActiveAdminTab('schedule');
     setIsCloudSyncing(true);
-    setScheduleNotice('✨ AI 隨機抽籤成功！已重新排定全新對戰組合（搭檔與對戰組合與上一次完全不同）');
-    setTimeout(() => setScheduleNotice(null), 4000);
+    setScheduleNotice(
+      referees.length > 0
+        ? '✨ AI 隨機抽籤成功！已重新排定全新對戰組合，並嚴格依 3 大防延誤規定指派裁判！'
+        : '✨ AI 隨機抽籤成功！已重新排定全新對戰組合（尚未加入裁判，可至「裁判名單」設定）'
+    );
+    setTimeout(() => setScheduleNotice(null), 4500);
 
     try {
-      await saveTournamentState(result, {});
+      await saveTournamentState(result, {}, referees);
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
     } catch (err) {
       console.warn('Failed saving generated schedule to cloud:', err);
@@ -611,7 +899,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setMatchScores(updated);
     setIsCloudSyncing(true);
     try {
-      await saveTournamentState(courtSchedule, updated);
+      await saveTournamentState(courtSchedule, updated, referees);
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
     } catch (err) {
       console.warn('Failed saving score to cloud:', err);
@@ -650,7 +938,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     setMatchScores(updated);
     setIsCloudSyncing(true);
     try {
-      await saveTournamentState(courtSchedule, updated);
+      await saveTournamentState(courtSchedule, updated, referees);
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
     } catch (err) {
       console.warn('Failed saving completion to cloud:', err);
@@ -1302,6 +1590,29 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </button>
         )}
 
+        {!isPublicView && (
+          <button
+            onClick={() => setActiveAdminTab('referees')}
+            className={`py-2 px-3 sm:px-4 text-xs sm:text-sm font-bold rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeAdminTab === 'referees'
+                ? 'bg-indigo-600 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span>裁判名單</span>
+            <span
+              className={`px-1.5 py-0.2 text-[10px] rounded-full font-black ${
+                activeAdminTab === 'referees'
+                  ? 'bg-white text-indigo-800'
+                  : 'bg-indigo-100 text-indigo-800'
+              }`}
+            >
+              {referees.length}
+            </span>
+          </button>
+        )}
+
         <button
           onClick={() => setActiveAdminTab('print')}
           className={`py-2 px-3 sm:px-4 text-xs sm:text-sm font-medium rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
@@ -1756,10 +2067,55 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                   </div>
                                 </div>
 
-                                <div className="text-center py-0.5">
-                                  <span className="text-[10px] font-black text-slate-400 bg-slate-100 px-2.5 py-0.5 rounded-full">
+                                {/* Centered VS with Referee Display (Left: 此場比賽裁判, Middle: VS, Right: 裁判是誰 & 臨時更換按鈕) */}
+                                <div className="flex items-center justify-between gap-1.5 py-1 px-3 bg-slate-50/90 rounded-xl border border-slate-200/70 text-xs my-0.5">
+                                  {/* VS 左邊：此場比賽裁判文字 */}
+                                  <div className="flex items-center gap-1 text-[11px] font-bold text-slate-500 shrink-0">
+                                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                                    <span>此場比賽裁判</span>
+                                  </div>
+
+                                  {/* 中間：VS */}
+                                  <span className="text-[10px] font-black text-slate-400 bg-white px-2 py-0.5 rounded-full border border-slate-200 shrink-0 shadow-2xs">
                                     VS
                                   </span>
+
+                                  {/* VS 右邊：裁判是誰 & 臨時更換按鈕 */}
+                                  <div className="flex items-center gap-1.5 text-[12px] justify-end truncate">
+                                    {match.refereeSubstitution ? (
+                                      <span className="inline-flex items-center gap-1">
+                                        <span className="line-through text-slate-400 text-[11px] truncate max-w-[65px] sm:max-w-none">
+                                          {match.refereeName || '未指定'}
+                                        </span>
+                                        <span className="font-extrabold text-indigo-900 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-md text-[11px] inline-flex items-center gap-1 shadow-2xs">
+                                          <span className="truncate">➔ {match.refereeSubstitution.substituteRefereeName}</span>
+                                          <span className="text-[9px] bg-indigo-600 text-white px-1 rounded font-black shrink-0">代執</span>
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      <span className="font-extrabold text-slate-800 text-[12px] truncate">
+                                        {match.refereeName || <span className="text-slate-400 font-normal">待指派</span>}
+                                      </span>
+                                    )}
+
+                                    {!isPublicView && (
+                                      <button
+                                        type="button"
+                                        disabled={isDone}
+                                        onClick={() => handleOpenRefereeSubModal(match, round)}
+                                        title={isDone ? '本場已完賽，請先解鎖才可更換裁判' : '臨時更換此場裁判人員'}
+                                        className={`p-1 rounded-md text-xs font-bold transition-all cursor-pointer shrink-0 ${
+                                          isDone
+                                            ? 'opacity-30 cursor-not-allowed text-slate-400'
+                                            : match.refereeSubstitution
+                                            ? 'text-indigo-800 hover:bg-indigo-100 bg-indigo-50'
+                                            : 'text-slate-400 hover:text-indigo-700 hover:bg-indigo-50'
+                                        }`}
+                                      >
+                                        <ArrowRightLeft className="w-3 h-3" />
+                                      </button>
+                                    )}
+                                  </div>
                                 </div>
 
                                 {/* Team B */}
@@ -2998,6 +3354,326 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         </div>
       )}
 
+      {/* Tab: Referees Management (裁判名單管理) */}
+      {activeAdminTab === 'referees' && (
+        <div className="space-y-6">
+          {/* Header Card */}
+          <div className="bg-gradient-to-br from-indigo-500/10 via-white to-indigo-500/5 rounded-2xl p-4 sm:p-6 border border-indigo-200/80 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="px-2.5 py-0.5 rounded-md bg-indigo-600 text-white text-[11px] font-black flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>賽事裁判名單管理</span>
+                </span>
+                <span className="text-xs font-bold text-indigo-900 bg-indigo-100 px-2 py-0.5 rounded-md">
+                  選手兼任 & 外部專職裁判
+                </span>
+              </div>
+              <h3 className="text-lg font-black text-slate-900">
+                裁判名單管理與 AI 防延誤自動指派
+              </h3>
+              <p className="text-xs text-slate-600 max-w-2xl leading-relaxed">
+                可從參賽選手名單內勾選兼任裁判，亦可外加非參賽專職裁判（如教練、球友眷屬等）。每次一鍵排定或點擊隨機指派時，AI 將隨機指派並嚴格遵守 3 大防延誤規定（比賽中不兼任、上場剛比完下場不當裁判、當裁判後下場不下場比賽）。
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <button
+                type="button"
+                onClick={handleReassignReferees}
+                className="px-4 py-2.5 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
+              >
+                <RefreshCw className="w-4 h-4 text-indigo-200" />
+                <span>🎲 依裁判名單隨機排裁判 (遵守3大規定)</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Quick Metrics Bar */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[11px] text-slate-500 font-bold block">裁判總人數</span>
+              <div className="text-xl font-black text-indigo-600 mt-0.5">{referees.length} 人</div>
+              <span className="text-[10px] text-slate-400 block mt-0.5">選手兼任 + 外部專職</span>
+            </div>
+
+            <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[11px] text-slate-500 font-bold block">選手兼任裁判</span>
+              <div className="text-xl font-black text-emerald-600 mt-0.5">
+                {referees.filter((r) => r.isPlayer).length} 人
+              </div>
+              <span className="text-[10px] text-slate-400 block mt-0.5">
+                占選手總數 {players.length > 0 ? Math.round((referees.filter((r) => r.isPlayer).length / players.length) * 100) : 0}%
+              </span>
+            </div>
+
+            <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[11px] text-slate-500 font-bold block">外部專職裁判</span>
+              <div className="text-xl font-black text-purple-600 mt-0.5">
+                {referees.filter((r) => !r.isPlayer).length} 人
+              </div>
+              <span className="text-[10px] text-slate-400 block mt-0.5">教練 / 志工工作人員</span>
+            </div>
+
+            <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[11px] text-slate-500 font-bold block">賽程執法覆蓋率</span>
+              <div className="text-xl font-black text-slate-900 mt-0.5">
+                {(() => {
+                  if (!courtSchedule || !courtSchedule.rounds) return '0%';
+                  const allMatches = courtSchedule.rounds.flatMap((r) => r.matches || []);
+                  if (allMatches.length === 0) return '0%';
+                  const assigned = allMatches.filter((m) => m.refereeName).length;
+                  return `${Math.round((assigned / allMatches.length) * 100)}%`;
+                })()}
+              </div>
+              <span className="text-[10px] text-slate-400 block mt-0.5">
+                {courtSchedule
+                  ? `${courtSchedule.rounds.flatMap((r) => r.matches || []).filter((m) => m.refereeName).length} / ${courtSchedule.rounds.flatMap((r) => r.matches || []).length} 場已指派`
+                  : '尚未排程'}
+              </span>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left Column (8 cols): Player Selection & External Referee Form */}
+            <div className="lg:col-span-7 space-y-6">
+              {/* Form 1: Add External/Non-Player Referee */}
+              <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-3">
+                <div className="flex items-center gap-2 border-b border-slate-100 pb-2.5">
+                  <div className="w-8 h-8 rounded-lg bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
+                    <UserPlus className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900">
+                      外加非選手名單內專職裁判（教練 / 工作人員 / 球友眷屬）
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      外部裁判無下場出賽排程衝突，可隨時靈活受排定執法各場次。
+                    </p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleAddExternalReferee} className="space-y-3 text-xs">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">
+                        裁判姓名 / 稱謂 <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={newExtRefName}
+                        onChange={(e) => setNewExtRefName(e.target.value)}
+                        placeholder="例如：陳教練、張主審、大會志工小李"
+                        className="w-full p-2.5 border border-slate-300 rounded-xl bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">
+                        身分備註 / 聯絡電話 (選填)
+                      </label>
+                      <input
+                        type="text"
+                        value={newExtRefNotes}
+                        onChange={(e) => setNewExtRefNotes(e.target.value)}
+                        placeholder="例如：羽協B級證照、主審室"
+                        className="w-full p-2.5 border border-slate-300 rounded-xl bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end">
+                    <button
+                      type="submit"
+                      disabled={!newExtRefName.trim()}
+                      className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>新增外部專職裁判</span>
+                    </button>
+                  </div>
+                </form>
+              </div>
+
+              {/* Section 2: Pick from Registered Players */}
+              <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                  <div>
+                    <h4 className="text-sm font-bold text-slate-900 flex items-center gap-1.5">
+                      <span>從參賽選手名單挑選兼任裁判</span>
+                      <span className="text-[11px] font-normal text-slate-500">
+                        （點選勾選即可加入/退出裁判名單）
+                      </span>
+                    </h4>
+                    <p className="text-[11px] text-slate-500">
+                      ※ 選手擔任裁判時，AI 將嚴格遵守 3 大防延誤規定（同輪不可比賽、上輪有比下輪不當、當裁判後下輪不下場）。
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleBatchTogglePlayersAsReferees(true)}
+                      className="px-2.5 py-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer"
+                    >
+                      全選選手兼任
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBatchTogglePlayersAsReferees(false)}
+                      className="px-2.5 py-1 text-[11px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors cursor-pointer"
+                    >
+                      清空選手裁判
+                    </button>
+                  </div>
+                </div>
+
+                {/* Filter and Search Players */}
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    value={refereeSearchQuery}
+                    onChange={(e) => setRefereeSearchQuery(e.target.value)}
+                    placeholder="搜尋參賽選手姓名..."
+                    className="w-full pl-9 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                  />
+                </div>
+
+                {/* Players Grid with Checkbox */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-[380px] overflow-y-auto pr-1">
+                  {players
+                    .filter((p) => {
+                      if (!refereeSearchQuery.trim()) return true;
+                      return p.name.toLowerCase().includes(refereeSearchQuery.toLowerCase());
+                    })
+                    .map((player) => {
+                      const isSelected = referees.some(
+                        (r) => r.isPlayer && (r.playerId === player.id || r.id === `ref-player-${player.id}`)
+                      );
+
+                      return (
+                        <div
+                          key={player.id}
+                          onClick={() => handleTogglePlayerReferee(player)}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all ${
+                            isSelected
+                              ? 'bg-indigo-50/90 border-indigo-300 ring-1 ring-indigo-200'
+                              : 'bg-white border-slate-200 hover:bg-slate-50'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <div className="shrink-0 text-indigo-600">
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-indigo-600" />
+                              ) : (
+                                <Square className="w-4 h-4 text-slate-300" />
+                              )}
+                            </div>
+                            <div className="truncate">
+                              <span className="font-extrabold text-xs text-slate-900 block truncate">
+                                {player.name}
+                              </span>
+                              <span className="text-[10px] text-slate-400 block truncate">
+                                {player.gender === 'male' ? '男士' : '女士'} · 參賽選手
+                              </span>
+                            </div>
+                          </div>
+
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[10px] font-bold shrink-0 ${
+                              isSelected
+                                ? 'bg-indigo-600 text-white'
+                                : 'bg-slate-100 text-slate-400'
+                            }`}
+                          >
+                            {isSelected ? '✓ 兼任裁判' : '點擊加入'}
+                          </span>
+                        </div>
+                      );
+                    })}
+                </div>
+              </div>
+            </div>
+
+            {/* Right Column (5 cols): Currently Active Referees Roster */}
+            <div className="lg:col-span-5 space-y-4">
+              <div className="bg-white rounded-2xl p-4 sm:p-5 border border-slate-200 shadow-xs space-y-3">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
+                  <div className="flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-indigo-600" />
+                    <h4 className="text-sm font-bold text-slate-900">
+                      目前裁判名單總冊 ({referees.length} 位)
+                    </h4>
+                  </div>
+                  <span className="text-[11px] text-slate-400">
+                    一鍵排程將由此名單隨機排定
+                  </span>
+                </div>
+
+                {referees.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400 border border-dashed border-slate-200 rounded-xl space-y-1">
+                    <ShieldCheck className="w-8 h-8 mx-auto text-slate-300" />
+                    <div className="font-bold text-xs text-slate-600">尚未加入任何裁判</div>
+                    <p className="text-[11px] text-slate-400 max-w-xs mx-auto">
+                      請由左側勾選「參賽選手兼任裁判」或手動新增「外部專職裁判」，系統將自動同步並支援隨機指派。
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2 max-h-[580px] overflow-y-auto pr-1">
+                    {referees.map((ref, idx) => {
+                      // Count matches refereed in current schedule
+                      const matchesCount = courtSchedule
+                        ? (courtSchedule.rounds || [])
+                            .flatMap((r) => r.matches || [])
+                            .filter((m) => m.refereeId === ref.id || m.refereeName === ref.name).length
+                        : 0;
+
+                      return (
+                        <div
+                          key={ref.id || `ref-${idx}`}
+                          className="p-3 bg-slate-50/80 rounded-xl border border-slate-200 flex items-center justify-between gap-2 shadow-2xs hover:bg-slate-100/60 transition-colors"
+                        >
+                          <div className="space-y-0.5 truncate">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="font-extrabold text-xs text-slate-900">
+                                {ref.name}
+                              </span>
+                              <span
+                                className={`px-1.5 py-0.2 rounded text-[10px] font-bold ${
+                                  ref.isPlayer
+                                    ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                    : 'bg-purple-100 text-purple-800 border border-purple-200'
+                                }`}
+                              >
+                                {ref.isPlayer ? '🏸 選手兼任' : '🛡️ 外部專職'}
+                              </span>
+                            </div>
+                            <div className="text-[10px] text-slate-500 flex items-center gap-2">
+                              <span>已排定執法：<strong>{matchesCount}</strong> 場</span>
+                              {ref.notes && <span>· {ref.notes}</span>}
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveReferee(ref.id)}
+                            title="從裁判名單中移除"
+                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Tab 3: Print View */}
       {activeAdminTab === 'print' && (
         <div className="space-y-6">
@@ -3112,6 +3788,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 VS
                               </span>
                               <span>{teamBStr}</span>
+                            </div>
+                            {/* Referee display in print card */}
+                            <div className="text-[12px] print:text-[9.5pt] text-slate-600 font-bold flex items-center justify-center gap-1.5 pt-0.5 border-t border-slate-200/60">
+                              <span className="text-slate-400">裁判：</span>
+                              {m.refereeSubstitution ? (
+                                <span className="text-indigo-900 font-black">
+                                  {m.refereeSubstitution.substituteRefereeName} (代執)
+                                </span>
+                              ) : (
+                                <span className="text-slate-700 font-bold">
+                                  {m.refereeName || '大會指派'}
+                                </span>
+                              )}
                             </div>
                           </div>
                         );
@@ -3761,6 +4450,216 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
                 >
                   關閉取消
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Referee Substitution Modal (臨時更換本場裁判人員) */}
+      {refereeSubModalState.isOpen && refereeSubModalState.match && refereeSubModalState.round && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-indigo-200 overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-indigo-700 to-indigo-800 p-4 sm:p-5 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center">
+                  <ShieldCheck className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base">
+                    臨時更換本場比賽裁判人員
+                  </h3>
+                  <p className="text-xs text-indigo-100">
+                    第 {refereeSubModalState.round.roundNumber} 輪 · 場地 {refereeSubModalState.match.courtNumber}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseRefereeSubModal}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/80 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Current Match Info Strip */}
+            <div className="bg-indigo-50/70 p-3 sm:px-5 border-b border-indigo-100 flex items-center justify-between text-xs">
+              <div className="flex items-center gap-2">
+                <span className="font-bold text-indigo-900">原排定裁判：</span>
+                <span className="font-extrabold text-indigo-700 bg-white px-2 py-0.5 rounded-md border border-indigo-200 shadow-2xs">
+                  {refereeSubModalState.match.refereeName || '尚未指定'}
+                </span>
+              </div>
+              {refereeSubModalState.match.refereeSubstitution && (
+                <span className="text-[11px] font-bold text-amber-800 bg-amber-100 border border-amber-300 px-2 py-0.5 rounded-full">
+                  ⚠️ 目前為更換代執中：{refereeSubModalState.match.refereeSubstitution.substituteRefereeName}
+                </span>
+              )}
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-4 sm:p-6 overflow-y-auto space-y-4 text-xs">
+              {/* Option 1: Choose from registered referees list */}
+              <div className="space-y-2">
+                <label className="block font-bold text-slate-900">
+                  方案一：從裁判名單挑選更換裁判
+                </label>
+                {referees.length === 0 ? (
+                  <p className="text-slate-400 italic bg-slate-50 p-2.5 rounded-xl border border-dashed border-slate-200">
+                    目前裁判名單尚未設定任何人員，請使用下方「手動輸入」或前往「裁判名單」設定。
+                  </p>
+                ) : (
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {referees.map((ref) => {
+                      // Check for rule conflicts in this round
+                      const currentRound = refereeSubModalState.round;
+                      const isPlayingInCurrent =
+                        ref.isPlayer &&
+                        currentRound?.matches?.some(
+                          (m) =>
+                            (m.teamA && (m.teamA[0]?.id === ref.playerId || m.teamA[1]?.id === ref.playerId)) ||
+                            (m.teamB && (m.teamB[0]?.id === ref.playerId || m.teamB[1]?.id === ref.playerId))
+                        );
+
+                      const isChosen = refSubSelectedId === ref.id;
+
+                      return (
+                        <div
+                          key={ref.id}
+                          onClick={() => {
+                            if (isPlayingInCurrent) return;
+                            setRefSubSelectedId(ref.id);
+                            setRefSubCustomName('');
+                          }}
+                          className={`p-2.5 rounded-xl border flex items-center justify-between gap-2 transition-all ${
+                            isPlayingInCurrent
+                              ? 'bg-rose-50/60 border-rose-200 opacity-60 cursor-not-allowed'
+                              : isChosen
+                              ? 'bg-indigo-50 border-indigo-400 ring-1 ring-indigo-300 cursor-pointer'
+                              : 'bg-white border-slate-200 hover:bg-slate-50 cursor-pointer'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2 truncate">
+                            <input
+                              type="radio"
+                              name="selectedRefRadio"
+                              checked={isChosen}
+                              disabled={isPlayingInCurrent}
+                              onChange={() => {}}
+                              className="text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <div>
+                              <span className="font-extrabold text-slate-900 block truncate">
+                                {ref.name}
+                              </span>
+                              <span className="text-[10px] text-slate-400 block truncate">
+                                {ref.isPlayer ? '🏸 參賽選手兼任' : '🛡️ 外部專職裁判'}
+                                {ref.notes ? ` · ${ref.notes}` : ''}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="shrink-0">
+                            {isPlayingInCurrent ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-rose-100 text-rose-700">
+                                ⛔ 本輪在場比賽中
+                              </span>
+                            ) : isChosen ? (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-600 text-white">
+                                ✓ 已選取
+                              </span>
+                            ) : (
+                              <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-slate-100 text-slate-600">
+                                可執法
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Divider */}
+              <div className="relative flex py-1 items-center">
+                <div className="grow border-t border-slate-200"></div>
+                <span className="shrink mx-3 text-slate-400 text-[11px] font-bold">或者</span>
+                <div className="grow border-t border-slate-200"></div>
+              </div>
+
+              {/* Option 2: Custom / Temporary Referee Input */}
+              <div className="space-y-1.5">
+                <label className="block font-bold text-slate-900">
+                  方案二：手動輸入非名單內臨時裁判姓名
+                </label>
+                <input
+                  type="text"
+                  value={refSubCustomName}
+                  onChange={(e) => {
+                    setRefSubCustomName(e.target.value);
+                    if (e.target.value.trim()) {
+                      setRefSubSelectedId('');
+                    }
+                  }}
+                  placeholder="例如：現場臨時代打主審、工作人員小王"
+                  className="w-full p-2.5 border border-slate-300 rounded-xl bg-slate-50 focus:bg-white focus:outline-hidden focus:ring-1 focus:ring-indigo-500"
+                />
+              </div>
+
+              {/* Reason for substitution */}
+              <div className="space-y-1.5">
+                <label className="block font-bold text-slate-900">
+                  更換理由 / 備註
+                </label>
+                <select
+                  value={refSubReason}
+                  onChange={(e) => setRefSubReason(e.target.value)}
+                  className="w-full p-2.5 border border-slate-300 rounded-xl bg-slate-50 text-slate-700 focus:bg-white"
+                >
+                  <option value="臨時公務交接">臨時公務交接</option>
+                  <option value="身體不適 / 體力調節">身體不適 / 體力調節</option>
+                  <option value="準備下輪熱身">準備下輪熱身</option>
+                  <option value="裁判輪替調度">裁判輪替調度</option>
+                  <option value="其他原因更換">其他原因更換</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-50 p-4 border-t border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-2">
+              {refereeSubModalState.match.refereeSubstitution ? (
+                <button
+                  type="button"
+                  onClick={handleResetRefereeSub}
+                  className="w-full sm:w-auto px-4 py-2 text-xs font-bold text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-300 rounded-xl transition-colors cursor-pointer"
+                >
+                  ❌ 恢復原排定裁判
+                </button>
+              ) : (
+                <div className="hidden sm:block text-[11px] text-slate-500">
+                  ※ 裁判更換將即時同步至雲端與公開賽程大螢幕。
+                </div>
+              )}
+
+              <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                <button
+                  type="button"
+                  onClick={handleCloseRefereeSubModal}
+                  className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+                >
+                  取消
+                </button>
+                <button
+                  type="button"
+                  onClick={handleApplyRefereeSub}
+                  disabled={!refSubSelectedId && !refSubCustomName.trim()}
+                  className="px-4 py-2 text-xs font-bold text-white bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 rounded-xl shadow-xs transition-colors cursor-pointer"
+                >
+                  確認更換裁判
                 </button>
               </div>
             </div>

@@ -79,6 +79,27 @@ export interface MatchSubstitutionRecord {
   timestamp: string;
 }
 
+export interface TournamentReferee {
+  id: string;
+  name: string;
+  isPlayer: boolean;
+  playerId?: string;
+  email?: string;
+  phone?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface RefereeSubstitutionRecord {
+  originalRefereeId?: string;
+  originalRefereeName: string;
+  substituteRefereeId?: string;
+  substituteRefereeName: string;
+  isExternal?: boolean;
+  reason?: string;
+  timestamp: string;
+}
+
 export interface CourtMatch {
   id: string;
   roundNumber: number;
@@ -90,6 +111,9 @@ export interface CourtMatch {
   scoreB?: number;
   status?: 'pending' | 'playing' | 'completed';
   substitutions?: Record<string, MatchSubstitutionRecord>; // key: originalPlayerId
+  refereeId?: string;
+  refereeName?: string;
+  refereeSubstitution?: RefereeSubstitutionRecord;
 }
 
 export interface ScheduleRound {
