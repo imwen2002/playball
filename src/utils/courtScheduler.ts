@@ -521,7 +521,9 @@ export function compilePlayerScheduleStats(
 
 /**
  * Assigns referees from the referee pool to each match across all rounds,
- * strictly abiding by the 3 referee delay-prevention rules:
+ * strictly abiding by the referee delay-prevention rules:
+ * Rule 0 (Non-consecutive refereeing): A referee who officiated in round R-1 CANNOT referee in round R
+ *        (prevents delays where round R matches wait for round R-1 referee to finish).
  * Rule 1: A player referee CANNOT be playing in the same round (neither team A nor team B on any court).
  * Rule 2: A player referee who played in round R-1 CANNOT referee in round R (avoids delays from previous match).
  * Rule 3: A player referee who referees in round R CANNOT play in round R+1 (avoids referee duties delaying next match).
@@ -557,24 +559,45 @@ export function assignRefereesToSchedule(
   const refereeWorkload = new Map<string, number>();
   referees.forEach((ref) => refereeWorkload.set(ref.id, 0));
 
+  // Track referee IDs assigned in each round to strictly prevent back-to-back refereeing
+  const refereesAssignedByRound: Set<string>[] = [];
+
   return rounds.map((round, rIdx) => {
     const refereesAssignedInThisRound = new Set<string>();
+    const previousRoundAssigned = rIdx > 0 ? refereesAssignedByRound[rIdx - 1] : new Set<string>();
 
     const updatedMatches = (round.matches || []).map((match) => {
-      // Find eligible referee candidates for this match
-      // Priority 1 (Strict): Satisfies Rule 1, Rule 2, Rule 3, and not already assigned in this round
-      // Priority 2 (Fallback): Satisfies Rule 1 (absolutely not playing in this round), not already assigned
+      // Tier 1 (Strict Perfect):
+      // - NOT assigned in this round
+      // - NOT assigned in previous round (Rule 0: No back-to-back refereeing)
+      // - If player: satisfies Rule 1 (not playing in R), Rule 2 (did not play in R-1), Rule 3 (will not play in R+1)
       const p1Candidates: TournamentReferee[] = [];
+
+      // Tier 2 (Guaranteed Non-consecutive refereeing, player has mild match proximity):
+      // - NOT assigned in this round
+      // - NOT assigned in previous round (Rule 0: No back-to-back refereeing)
+      // - If player: satisfies Rule 1 (not playing in R)
       const p2Candidates: TournamentReferee[] = [];
+
+      // Tier 3 (Only used as emergency fallback if total pool has < 6 referees):
+      // - NOT assigned in this round
+      // - If player: satisfies Rule 1 (not playing in R)
+      const p3Candidates: TournamentReferee[] = [];
 
       for (const ref of referees) {
         if (refereesAssignedInThisRound.has(ref.id)) {
           continue; // Cannot referee two courts in the exact same round
         }
 
+        const isRefFromPreviousRound = previousRoundAssigned.has(ref.id);
+
         if (!ref.isPlayer) {
-          // External referee: immune to player scheduling constraints
-          p1Candidates.push(ref);
+          // External referee: immune to player constraints
+          if (!isRefFromPreviousRound) {
+            p1Candidates.push(ref);
+          } else {
+            p3Candidates.push(ref);
+          }
           continue;
         }
 
@@ -583,7 +606,7 @@ export function assignRefereesToSchedule(
         // Rule 1: Cannot be playing in current round
         const isPlayingInCurrentRound = playersPlayingInRound[rIdx]?.has(pid);
         if (isPlayingInCurrentRound) {
-          continue; // Strict violation of Rule 1
+          continue; // Strict violation: cannot referee and play at the same time
         }
 
         // Rule 2: Cannot have played in previous round (rIdx - 1)
@@ -592,15 +615,24 @@ export function assignRefereesToSchedule(
         // Rule 3: Cannot play in next round (rIdx + 1)
         const playsInNextRound = rIdx < rounds.length - 1 && playersPlayingInRound[rIdx + 1]?.has(pid);
 
-        if (!playedInPreviousRound && !playsInNextRound) {
-          p1Candidates.push(ref);
+        if (!isRefFromPreviousRound) {
+          if (!playedInPreviousRound && !playsInNextRound) {
+            p1Candidates.push(ref);
+          } else {
+            p2Candidates.push(ref);
+          }
         } else {
-          // Only Rule 1 satisfied (not playing in current round)
-          p2Candidates.push(ref);
+          // Back-to-back refereeing: only allowed if < 6 referees available
+          p3Candidates.push(ref);
         }
       }
 
-      const candidatePool = p1Candidates.length > 0 ? p1Candidates : p2Candidates;
+      const candidatePool =
+        p1Candidates.length > 0
+          ? p1Candidates
+          : p2Candidates.length > 0
+          ? p2Candidates
+          : p3Candidates;
 
       if (candidatePool.length === 0) {
         // No referee available
@@ -625,6 +657,8 @@ export function assignRefereesToSchedule(
         refereeName: chosenRef.name,
       };
     });
+
+    refereesAssignedByRound.push(refereesAssignedInThisRound);
 
     return {
       ...round,

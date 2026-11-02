@@ -3434,6 +3434,49 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
             </div>
           </div>
 
+          {/* Smart Non-consecutive Referee Count Helper Banner */}
+          {referees.length < 6 ? (
+            <div className="bg-amber-50 border border-amber-200/90 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-xs">
+              <div className="flex items-start gap-3">
+                <div className="w-8 h-8 rounded-xl bg-amber-500 text-white flex items-center justify-center shrink-0 font-black shadow-xs text-sm">
+                  💡
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="font-extrabold text-amber-950 text-sm">
+                      裁判人數建議：目前名單共有 {referees.length} 位（建議至少配置 6 位裁判）
+                    </span>
+                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-amber-200 text-amber-900">
+                      尚差 {6 - referees.length} 人
+                    </span>
+                  </div>
+                  <p className="text-amber-800 leading-relaxed">
+                    本賽制為 <strong>3 個場地同時開打</strong>（每輪需 3 位裁判在場）。若要達成<strong>「第一輪的裁判不接第二輪裁判（執法一場休息一場，絕不因超時耽誤下一場開打）」</strong>，系統需要至少 <strong>6 位裁判</strong>（3 人奇數輪、3 人偶數輪交替輪值）。目前名單人數不足，部分場次可能需同人跨輪支援。建議由下方外加專職志工/眷屬，或多挑選輪休選手補齊至 6 人以上！
+                  </p>
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-emerald-50 border border-emerald-200/90 rounded-2xl p-3.5 sm:px-4 flex items-center justify-between gap-3 text-xs shadow-xs">
+              <div className="flex items-center gap-2.5">
+                <div className="w-7 h-7 rounded-lg bg-emerald-600 text-white flex items-center justify-center shrink-0 font-bold">
+                  <CheckCircle2 className="w-4 h-4" />
+                </div>
+                <div>
+                  <span className="font-extrabold text-emerald-950">
+                    ✓ 裁判名單已滿 {referees.length} 位（符合 6 人以上「絕不連場」標準）！
+                  </span>
+                  <span className="text-emerald-700 ml-2 hidden sm:inline">
+                    AI 自動以 3 人為一組進行奇偶輪交叉排定，保證每位裁判執法一場休息一場，100% 絕不連場耽誤開賽！
+                  </span>
+                </div>
+              </div>
+              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-emerald-600 text-white shrink-0">
+                完美雙組輪替
+              </span>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
             {/* Left Column (8 cols): Player Selection & External Referee Form */}
             <div className="lg:col-span-7 space-y-6">
