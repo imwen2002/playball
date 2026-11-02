@@ -85,6 +85,12 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Navigation inside Admin: 'schedule' (3-Court) | 'scores' (Prize leaderboard) | 'roster' | 'referees' | 'print'
   const [activeAdminTab, setActiveAdminTab] = useState<'schedule' | 'scores' | 'roster' | 'referees' | 'print'>('schedule');
 
+  useEffect(() => {
+    if (isPublicView && (activeAdminTab === 'print' || activeAdminTab === 'roster' || activeAdminTab === 'referees')) {
+      setActiveAdminTab('schedule');
+    }
+  }, [isPublicView, activeAdminTab]);
+
   // Layout view toggle in Roster ('table' = 條列式清單 | 'cards' = 卡片)
   const [rosterViewMode, setRosterViewMode] = useState<'table' | 'cards'>('table');
 
@@ -700,12 +706,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       (s) => s.completed || (s.scoreA && s.scoreA > 0) || (s.scoreB && s.scoreB > 0)
     );
 
-    if (courtSchedule && courtSchedule.rounds.length > 0 && hasScoresEntered) {
-      const confirmReset = window.confirm(
-        '⚠️ 提醒：目前賽程已有填寫的比分或完賽紀錄。\n\n重新一鍵排定將透過 AI 隨機抽籤產生【與上一次完全不同】的搭檔與對戰組合，原有的比分紀錄將會重置。\n\n確定要重新排定賽程嗎？'
-      );
-      if (!confirmReset) return;
-    }
+    // Prompt warning confirmation before executing AI scheduling
+    const isReschedule = Boolean(courtSchedule && courtSchedule.rounds && courtSchedule.rounds.length > 0);
+    const confirmMessage = isReschedule
+      ? (hasScoresEntered
+          ? '⚠️ 警告提醒：確定要執行【重新一鍵排定 (AI抽籤)】嗎？\n\n目前賽程已有填寫的比分或完賽紀錄。重新排定將透過 AI 隨機重新抽籤產生全新對戰組合與裁判名單，既有排程與所有比分紀錄都將被覆蓋清除！\n\n確定要繼續執行嗎？'
+          : '⚠️ 確定要執行【重新一鍵排定 (AI抽籤)】嗎？\n\n系統將為所有 5 人組別透過 AI 隨機抽籤全新搭檔組合與指派裁判，既有賽程將被替換。\n\n確定要重新排定嗎？')
+      : '⚠️ 確定要執行【一鍵排定 3 場地賽程】嗎？\n\n系統將自動依同等級 5 人循環規則，隨機抽籤產生 4 場零重複搭檔賽程並自動排定裁判名單。\n\n確定要排定嗎？';
+
+    const confirmAction = window.confirm(confirmMessage);
+    if (!confirmAction) return;
 
     // Pass the existing schedule's canonical fingerprint so the generator strictly avoids duplicates
     const prevFingerprint = courtSchedule ? computeScheduleFingerprint(courtSchedule) : undefined;
@@ -1279,24 +1289,13 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
           {/* Top Right Action: Cloud Sync Status & Public Share Button / Lock Admin */}
           <div className="flex items-center gap-2 flex-wrap shrink-0 self-start md:self-auto">
-            {isPublicView ? (
-              <button
-                type="button"
-                onClick={() => window.print()}
-                className="px-3 py-2 text-xs font-bold bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-300 rounded-xl transition-colors flex items-center gap-1.5 cursor-pointer"
-              >
-                <Printer className="w-3.5 h-3.5" />
-                <span>列印</span>
-              </button>
-            ) : (
-              <div className="px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/90 text-emerald-900 text-xs font-semibold flex items-center gap-1.5 shadow-2xs">
-                <span className={`w-2 h-2 rounded-full ${isCloudSyncing ? 'bg-amber-500 animate-ping' : 'bg-emerald-500 animate-pulse'}`} />
-                <span>{isCloudSyncing ? '雲端同步中...' : '雲端連線即時同步'}</span>
-                <span className="text-[11px] text-emerald-700 font-normal">
-                  {lastCloudSyncTime ? `(${lastCloudSyncTime})` : '(跨裝置已連線)'}
-                </span>
-              </div>
-            )}
+            <div className="px-3 py-1.5 rounded-xl border border-emerald-200 bg-emerald-50/90 text-emerald-900 text-xs font-semibold flex items-center gap-1.5 shadow-2xs">
+              <span className={`w-2 h-2 rounded-full ${isCloudSyncing ? 'bg-amber-500 animate-ping' : 'bg-emerald-500 animate-pulse'}`} />
+              <span>{isCloudSyncing ? '雲端同步中...' : '雲端連線即時同步'}</span>
+              <span className="text-[11px] text-emerald-700 font-normal">
+                {lastCloudSyncTime ? `(${lastCloudSyncTime})` : '(跨裝置已連線)'}
+              </span>
+            </div>
 
             {!isPublicView && onLockAdmin && (
               <button
@@ -1432,13 +1431,6 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           <div className="space-y-1 pt-1">
             <div className="flex items-center justify-between text-[11px] text-slate-600">
               <span className="font-semibold">選手分級分佈 (0~18級)：</span>
-              <button
-                onClick={onViewOfficialChart}
-                className="text-emerald-700 hover:underline flex items-center gap-1 font-medium cursor-pointer"
-              >
-                <Award className="w-3 h-3" />
-                對照制度說明
-              </button>
             </div>
             <div className="flex items-center h-2.5 w-full bg-slate-100 rounded-full overflow-hidden">
               {BADMINTON_TIERS.map((tier) => {
@@ -1613,17 +1605,19 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </button>
         )}
 
-        <button
-          onClick={() => setActiveAdminTab('print')}
-          className={`py-2 px-3 sm:px-4 text-xs sm:text-sm font-medium rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
-            activeAdminTab === 'print'
-              ? 'bg-slate-900 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-          }`}
-        >
-          <Printer className="w-4 h-4" />
-          <span>{isPublicView ? '列印公布版型' : '列印公布排版'}</span>
-        </button>
+        {!isPublicView && (
+          <button
+            onClick={() => setActiveAdminTab('print')}
+            className={`py-2 px-3 sm:px-4 text-xs sm:text-sm font-medium rounded-xl whitespace-nowrap transition-all flex items-center gap-1.5 cursor-pointer ${
+              activeAdminTab === 'print'
+                ? 'bg-slate-900 text-white shadow-xs'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Printer className="w-4 h-4" />
+            <span>列印公布排版</span>
+          </button>
+        )}
       </div>
 
       {/* Tab 1: 3-Court Schedule Engine */}

@@ -73,18 +73,6 @@ export const Header: React.FC<HeaderProps> = ({
             </button>
 
             <button
-              onClick={() => onSelectTab('chart')}
-              className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer ${
-                currentTab === 'chart'
-                  ? 'bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-100'
-              }`}
-            >
-              <Award className="w-3.5 h-3.5 text-amber-500" />
-              <span>0~18級對照圖</span>
-            </button>
-
-            <button
               onClick={() => onSelectTab('schedule')}
               className={`px-3 py-1.5 text-xs sm:text-sm font-medium rounded-lg transition-colors whitespace-nowrap shrink-0 flex items-center gap-1.5 cursor-pointer ${
                 currentTab === 'schedule'
@@ -173,17 +161,6 @@ export const Header: React.FC<HeaderProps> = ({
             <span>賽程表</span>
           </button>
 
-          <button
-            onClick={() => onSelectTab('chart')}
-            className={`flex-1 py-1.5 px-2 text-xs font-bold rounded-lg text-center whitespace-nowrap transition-colors flex items-center justify-center gap-1 cursor-pointer ${
-              currentTab === 'chart'
-                ? 'bg-emerald-600 text-white shadow-xs'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-          >
-            <Award className="w-3 h-3" />
-            <span>0~18級圖</span>
-          </button>
 
           <button
             onClick={() => onSelectTab('admin')}
