@@ -632,6 +632,13 @@ export function assignRefereesToSchedule(
           continue; // Cannot referee two courts in the exact same round
         }
 
+        // Hard Quota Check: if referee has reached their targetMatches quota, do not assign
+        const currentCount = refereeWorkload.get(ref.id) ?? 0;
+        const targetMatches = ref.targetMatches !== undefined ? Math.max(1, ref.targetMatches) : 2;
+        if (currentCount >= targetMatches) {
+          continue; // Reached maximum allowed matches
+        }
+
         const isRefFromPreviousRound = previousRoundAssigned.has(ref.id);
 
         if (!ref.isPlayer) {
@@ -678,8 +685,8 @@ export function assignRefereesToSchedule(
           : p3Candidates;
 
       if (candidatePool.length === 0) {
-        // No referee available without scheduling a player who plays next round!
-        // Leave unassigned so the player's next match schedule is protected!
+        // No referee available without scheduling a player who plays next round or exceeding quota!
+        // Leave unassigned so the player's next match schedule and referee quota are protected!
         return {
           ...match,
           refereeId: undefined,
@@ -687,10 +694,19 @@ export function assignRefereesToSchedule(
         };
       }
 
-      // Sort by workload ascending (fewest matches first) with randomized tiebreaker
+      // Sort by workload ascending (fewest matches first) with priority to those furthest from quota
       const sortedPool = [...candidatePool].sort((a, b) => {
         const countA = refereeWorkload.get(a.id) ?? 0;
         const countB = refereeWorkload.get(b.id) ?? 0;
+        const quotaA = a.targetMatches !== undefined ? Math.max(1, a.targetMatches) : 2;
+        const quotaB = b.targetMatches !== undefined ? Math.max(1, b.targetMatches) : 2;
+        const remainingA = quotaA - countA;
+        const remainingB = quotaB - countB;
+
+        // Prioritize referee who has more remaining quota
+        if (remainingA !== remainingB) return remainingB - remainingA;
+
+        // Secondary: fewest matches refereed so far
         if (countA !== countB) return countA - countB;
         return randomize ? Math.random() - 0.5 : 0;
       });
@@ -713,6 +729,50 @@ export function assignRefereesToSchedule(
       matches: updatedMatches,
     };
   });
+}
+
+export interface RefereeCapacityReport {
+  totalMatches: number;
+  totalCapacity: number;
+  shortageCount: number;
+  recommendedMoreReferees: number;
+  assignedCount: number;
+  unassignedMatchCount: number;
+  unassignedMatches: { roundNumber: number; courtNumber: number; matchId: string }[];
+}
+
+/**
+ * Diagnostic helper: calculates tournament referee capacity and identifies shortages
+ */
+export function analyzeRefereeCapacity(
+  rounds: ScheduleRound[],
+  referees: TournamentReferee[],
+  defaultTargetMatches: number = 2
+): RefereeCapacityReport {
+  const allMatches = (rounds || []).flatMap((r) => r.matches || []);
+  const totalMatches = allMatches.length;
+  const totalCapacity = (referees || []).reduce(
+    (sum, r) => sum + (r.targetMatches !== undefined ? Math.max(0, r.targetMatches) : defaultTargetMatches),
+    0
+  );
+  const shortageCount = Math.max(0, totalMatches - totalCapacity);
+  const recommendedMoreReferees = shortageCount > 0 ? Math.ceil(shortageCount / defaultTargetMatches) : 0;
+  const assignedCount = allMatches.filter((m) => !!m.refereeName).length;
+  const unassignedMatches = (rounds || []).flatMap((r) =>
+    (r.matches || [])
+      .filter((m) => !m.refereeName)
+      .map((m) => ({ roundNumber: r.roundNumber, courtNumber: m.courtNumber, matchId: m.id }))
+  );
+
+  return {
+    totalMatches,
+    totalCapacity,
+    shortageCount,
+    recommendedMoreReferees,
+    assignedCount,
+    unassignedMatchCount: unassignedMatches.length,
+    unassignedMatches,
+  };
 }
 
 /**

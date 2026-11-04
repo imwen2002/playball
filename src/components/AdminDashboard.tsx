@@ -16,6 +16,8 @@ import {
   validateFivePlayerRule,
   computeScheduleFingerprint,
   assignRefereesToSchedule,
+  analyzeRefereeCapacity,
+  RefereeCapacityReport,
   FivePlayerValidationResult,
 } from '../utils/courtScheduler';
 import { subscribeToTournamentState, saveTournamentState } from '../firebase';
@@ -582,6 +584,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
         isPlayer: true,
         playerId: player.id,
         email: player.email,
+        targetMatches: 2,
         createdAt: new Date().toISOString(),
       };
       nextReferees = [...referees, newRef];
@@ -624,6 +627,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       name: cleanName,
       isPlayer: false,
       notes: newExtRefNotes.trim() || '',
+      targetMatches: 2,
       createdAt: new Date().toISOString(),
     };
     const nextReferees = [...referees, newRef];
@@ -662,6 +666,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           isPlayer: true,
           playerId: p.id,
           email: p.email,
+          targetMatches: 2,
           createdAt: new Date().toISOString(),
         }));
       nextReferees = [...externalOnly, ...referees.filter((r) => r.isPlayer), ...newPlayerRefs];
@@ -676,6 +681,42 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     debouncedSaveTournamentState(courtSchedule, matchScores, nextReferees, 100);
   };
 
+  const handleUpdateRefereeMatches = (refereeId: string, count: number) => {
+    const validCount = Math.max(1, Math.min(99, Math.round(count)));
+    const nextReferees = referees.map((r) =>
+      r.id === refereeId ? { ...r, targetMatches: validCount } : r
+    );
+    setReferees(nextReferees);
+    try {
+      localStorage.setItem('badminton_referees_list', JSON.stringify(nextReferees));
+    } catch {}
+    debouncedSaveTournamentState(courtSchedule, matchScores, nextReferees, 100);
+  };
+
+  const handleBatchSetRefereeMatches = (scope: 'all' | 'players' | 'externals', count: number) => {
+    const validCount = Math.max(1, Math.min(99, Math.round(count)));
+    const nextReferees = referees.map((r) => {
+      if (scope === 'all') return { ...r, targetMatches: validCount };
+      if (scope === 'players' && r.isPlayer) return { ...r, targetMatches: validCount };
+      if (scope === 'externals' && !r.isPlayer) return { ...r, targetMatches: validCount };
+      return r;
+    });
+    setReferees(nextReferees);
+    try {
+      localStorage.setItem('badminton_referees_list', JSON.stringify(nextReferees));
+    } catch {}
+    debouncedSaveTournamentState(courtSchedule, matchScores, nextReferees, 100);
+    const scopeLabel = scope === 'all' ? '所有裁判' : scope === 'players' ? '選手兼任裁判' : '外部專職裁判';
+    setScheduleNotice(`✨ 已批次將【${scopeLabel}】執法場次設定為 ${validCount} 場！`);
+    setTimeout(() => setScheduleNotice(null), 3500);
+  };
+
+  // Real-time referee capacity diagnostic report
+  const refereeCapacityReport = useMemo(() => {
+    if (!courtSchedule || !courtSchedule.rounds) return null;
+    return analyzeRefereeCapacity(courtSchedule.rounds, referees, 2);
+  }, [courtSchedule, referees]);
+
   const handleReassignReferees = async () => {
     if (!courtSchedule || !courtSchedule.rounds || courtSchedule.rounds.length === 0) {
       alert('目前尚未排定賽程，請先在「3 場地循環排程表」點選排程！');
@@ -685,6 +726,22 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       alert('目前裁判名單尚無人員！請先在下方挑選選手或新增專職裁判。');
       return;
     }
+
+    // Capacity shortage check and warning
+    const report = analyzeRefereeCapacity(courtSchedule.rounds, referees, 2);
+    if (report.shortageCount > 0) {
+      const confirmMsg =
+        `⚠️ 裁判執法場次總容量不足警告！\n\n` +
+        `• 比賽總場次：${report.totalMatches} 場\n` +
+        `• 目前裁判名單總容量：${report.totalCapacity} 場（尚缺 ${report.shortageCount} 場裁判）\n` +
+        `• 建議處置：至少需再增加 ${report.recommendedMoreReferees} 位裁判（以每人執法 2 場計算），或提高個別裁判場次上限。\n\n` +
+        `若繼續強制排定，系統將依設定場次分配，但將有 ${report.shortageCount} 場無法分配到裁判。\n\n` +
+        `確定仍要執行隨機排定嗎？`;
+      if (!window.confirm(confirmMsg)) {
+        return;
+      }
+    }
+
     const updatedRounds = assignRefereesToSchedule(courtSchedule.rounds, referees, true);
     const updatedSchedule: TournamentScheduleResult = {
       ...courtSchedule,
@@ -692,8 +749,16 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
     };
     setCourtSchedule(updatedSchedule);
     setIsCloudSyncing(true);
-    setScheduleNotice('✨ 已依最新裁判名單（嚴格遵守 3 大防延誤規定）為全場次重新隨機排定裁判！');
-    setTimeout(() => setScheduleNotice(null), 4500);
+
+    const afterReport = analyzeRefereeCapacity(updatedRounds, referees, 2);
+    if (afterReport.unassignedMatchCount > 0) {
+      setScheduleNotice(
+        `⚠️ 隨機排定完成！因名單場次配額或防延誤規則限制，共有 ${afterReport.unassignedMatchCount} 場賽事未能指派裁判，請至賽程表查看或補齊裁判名單！`
+      );
+    } else {
+      setScheduleNotice('✨ 已依最新裁判名單與場次配額（嚴格遵守 3 大防延誤規定）為全場次重新隨機排定裁判！');
+    }
+    setTimeout(() => setScheduleNotice(null), 5500);
     try {
       await saveTournamentState(updatedSchedule, matchScores, referees);
       setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
@@ -3607,11 +3672,21 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           </div>
 
           {/* Quick Metrics Bar */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
             <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
               <span className="text-[11px] text-slate-500 font-bold block">裁判總人數</span>
               <div className="text-xl font-black text-indigo-600 mt-0.5">{referees.length} 人</div>
               <span className="text-[10px] text-slate-400 block mt-0.5">選手兼任 + 外部專職</span>
+            </div>
+
+            <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-[11px] text-slate-500 font-bold block">裁判執法總容量</span>
+              <div className="text-xl font-black text-indigo-700 mt-0.5">
+                {refereeCapacityReport ? `${refereeCapacityReport.totalCapacity} 場` : '0 場'}
+              </div>
+              <span className="text-[10px] text-slate-400 block mt-0.5">
+                {refereeCapacityReport ? `賽事總場次 ${refereeCapacityReport.totalMatches} 場` : '尚未排程'}
+              </span>
             </div>
 
             <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
@@ -3632,7 +3707,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               <span className="text-[10px] text-slate-400 block mt-0.5">教練 / 志工工作人員</span>
             </div>
 
-            <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs">
+            <div className="p-3.5 bg-white rounded-xl border border-slate-200 shadow-2xs col-span-2 sm:col-span-1">
               <span className="text-[11px] text-slate-500 font-bold block">賽程執法覆蓋率</span>
               <div className="text-xl font-black text-slate-900 mt-0.5">
                 {(() => {
@@ -3650,6 +3725,36 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
               </span>
             </div>
           </div>
+
+          {/* Capacity Shortage Error Alert Banner (if shortage exists) */}
+          {refereeCapacityReport && refereeCapacityReport.shortageCount > 0 && (
+            <div className="bg-rose-50 border-2 border-rose-300 rounded-2xl p-4 sm:p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs shadow-xs animate-pulse">
+              <div className="flex items-start gap-3">
+                <div className="w-9 h-9 rounded-xl bg-rose-600 text-white flex items-center justify-center shrink-0 font-black shadow-xs text-base">
+                  ⚠️
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-extrabold text-rose-950 text-sm">
+                      裁判執法容量不足警告：目前賽程共 {refereeCapacityReport.totalMatches} 場，名單總容量僅 {refereeCapacityReport.totalCapacity} 場！
+                    </span>
+                    <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black bg-rose-200 text-rose-900 border border-rose-300">
+                      尚缺 {refereeCapacityReport.shortageCount} 場裁判
+                    </span>
+                  </div>
+                  <p className="text-rose-800 leading-relaxed">
+                    目前設定的裁判人數與個人場次上限無法涵蓋全部比賽！若以每人執法 2 場計算，<strong>至少需再增加 {refereeCapacityReport.recommendedMoreReferees} 位裁判</strong>，或由下方名單調高個別專職/兼任裁判的執法場次上限，否則隨機排定時將有 {refereeCapacityReport.shortageCount} 場無裁判執法。
+                  </p>
+                </div>
+              </div>
+              <div className="text-right shrink-0">
+                <span className="text-[10px] text-rose-600 font-bold block">缺額場次</span>
+                <span className="text-2xl font-black text-rose-700 font-mono">
+                  -{refereeCapacityReport.shortageCount} 場
+                </span>
+              </div>
+            </div>
+          )}
 
           {/* Smart Non-consecutive Referee Count Helper Banner */}
           {referees.length < 6 ? (
@@ -3871,6 +3976,50 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   </span>
                 </div>
 
+                {/* Batch Match Quotas Quick Toolbar */}
+                {referees.length > 0 && (
+                  <div className="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between text-[11px]">
+                      <span className="font-bold text-slate-700 flex items-center gap-1">
+                        ⚡ 批次設定每人執法場次配額：
+                      </span>
+                      <span className="text-indigo-700 font-bold font-mono">
+                        總容量：{refereeCapacityReport?.totalCapacity ?? 0} 場
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      <button
+                        type="button"
+                        onClick={() => handleBatchSetRefereeMatches('all', 2)}
+                        className="px-2.5 py-1 text-[11px] font-bold bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-slate-700 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                      >
+                        全體 2 場
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleBatchSetRefereeMatches('all', 3)}
+                        className="px-2.5 py-1 text-[11px] font-bold bg-white hover:bg-slate-100 border border-slate-200 rounded-lg text-slate-700 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                      >
+                        全體 3 場
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleBatchSetRefereeMatches('players', 2)}
+                        className="px-2.5 py-1 text-[11px] font-bold bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-lg text-emerald-800 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                      >
+                        選手兼任 2 場
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleBatchSetRefereeMatches('externals', 4)}
+                        className="px-2.5 py-1 text-[11px] font-bold bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-lg text-purple-800 shadow-2xs transition-all active:scale-95 cursor-pointer"
+                      >
+                        外部專職 4 場
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {referees.length === 0 ? (
                   <div className="py-12 text-center text-slate-400 border border-dashed border-slate-200 rounded-xl space-y-1">
                     <ShieldCheck className="w-8 h-8 mx-auto text-slate-300" />
@@ -3888,6 +4037,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                             .flatMap((r) => r.matches || [])
                             .filter((m) => m.refereeId === ref.id || m.refereeName === ref.name).length
                         : 0;
+                      const targetCount = ref.targetMatches !== undefined ? ref.targetMatches : 2;
 
                       return (
                         <div
@@ -3909,20 +4059,66 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 {ref.isPlayer ? '🏸 選手兼任' : '🛡️ 外部專職'}
                               </span>
                             </div>
-                            <div className="text-[10px] text-slate-500 flex items-center gap-2">
-                              <span>已排定執法：<strong>{matchesCount}</strong> 場</span>
+                            <div className="text-[10px] text-slate-500 flex items-center gap-2 flex-wrap">
+                              <span>
+                                執法進度：<strong>{matchesCount}</strong> / {targetCount} 場
+                              </span>
+                              {matchesCount >= targetCount && matchesCount > 0 && (
+                                <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                                  已達上限
+                                </span>
+                              )}
                               {ref.notes && <span>· {ref.notes}</span>}
                             </div>
                           </div>
 
-                          <button
-                            type="button"
-                            onClick={() => handleRemoveReferee(ref.id)}
-                            title="從裁判名單中移除"
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center gap-2.5 shrink-0">
+                            {/* Stepper for adjusting referee match quota */}
+                            <div
+                              className="flex items-center bg-white border border-slate-200 rounded-lg p-0.5 shadow-2xs"
+                              title="調整此裁判預計執法場次上限"
+                            >
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateRefereeMatches(ref.id, targetCount - 1)}
+                                disabled={targetCount <= 1}
+                                className="w-5 h-5 flex items-center justify-center text-slate-600 hover:text-indigo-600 disabled:opacity-30 rounded hover:bg-slate-100 font-bold text-xs cursor-pointer"
+                                title="減少場次"
+                              >
+                                -
+                              </button>
+                              <div className="flex items-center px-1">
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={99}
+                                  value={targetCount}
+                                  onChange={(e) =>
+                                    handleUpdateRefereeMatches(ref.id, Number(e.target.value) || 1)
+                                  }
+                                  className="w-6 text-center font-black text-xs text-indigo-700 bg-transparent focus:outline-none focus:ring-1 focus:ring-indigo-500 rounded"
+                                />
+                                <span className="text-[10px] text-slate-400">場</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleUpdateRefereeMatches(ref.id, targetCount + 1)}
+                                className="w-5 h-5 flex items-center justify-center text-slate-600 hover:text-indigo-600 rounded hover:bg-slate-100 font-bold text-xs cursor-pointer"
+                                title="增加場次"
+                              >
+                                +
+                              </button>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveReferee(ref.id)}
+                              title="從裁判名單中移除"
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
                       );
                     })}

@@ -88,6 +88,7 @@ export interface TournamentReferee {
   phone?: string;
   notes?: string;
   createdAt: string;
+  targetMatches?: number; // 預計/最多執法場次 (預設 2)
 }
 
 export interface RefereeSubstitutionRecord {
