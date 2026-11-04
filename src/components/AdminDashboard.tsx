@@ -138,7 +138,27 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
   // Selected court filter in schedule: 0 = all, 1, 2, 3
   const [selectedCourtFilter, setSelectedCourtFilter] = useState<number>(0);
   const [scheduleViewMode, setScheduleViewMode] = useState<'byRound' | 'byPlayer'>('byRound');
-  const [expandedPlayerStats, setExpandedPlayerStats] = useState<string | null>(null);
+  const [expandedPlayerIds, setExpandedPlayerIds] = useState<Set<string>>(new Set());
+
+  const togglePlayerStatsExpanded = (playerId: string) => {
+    setExpandedPlayerIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(playerId)) {
+        next.delete(playerId);
+      } else {
+        next.add(playerId);
+      }
+      return next;
+    });
+  };
+
+  const handleToggleAllPlayerStats = (expand: boolean, allIds: string[]) => {
+    if (expand) {
+      setExpandedPlayerIds(new Set(allIds));
+    } else {
+      setExpandedPlayerIds(new Set());
+    }
+  };
 
   // Match scores tracking (matchId -> { scoreA, scoreB, completed })
   const [matchScores, setMatchScores] = useState<Record<string, { scoreA?: number; scoreB?: number; completed?: boolean }>>({});
@@ -2611,13 +2631,34 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
           {/* Content: byPlayer View */}
           {scheduleViewMode === 'byPlayer' && courtSchedule && (
             <div className="bg-white rounded-2xl p-4 sm:p-6 border border-slate-200 shadow-xs space-y-4">
-              <div className="border-b border-slate-100 pb-3">
-                <h4 className="font-bold text-sm text-slate-900">
-                  選手出賽完整檢核表（每人固定 4 場循環賽）
-                </h4>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  點擊選手可展開查看 4 場出賽的輪次、場地編號、搭檔與交手對手。
-                </p>
+              <div className="border-b border-slate-100 pb-3 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                <div>
+                  <h4 className="font-bold text-sm text-slate-900">
+                    選手出賽完整檢核表（每人固定 4 場循環賽）
+                  </h4>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    點擊選手可展開查看 4 場出賽的輪次、場地編號、搭檔與交手對手（支援同時獨立展開多位）。
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const allIds = Object.keys(courtSchedule.playerStats || {});
+                      handleToggleAllPlayerStats(true, allIds);
+                    }}
+                    className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-colors shadow-2xs"
+                  >
+                    展開全部
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => handleToggleAllPlayerStats(false, [])}
+                    className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 transition-colors shadow-2xs"
+                  >
+                    全部收回
+                  </button>
+                </div>
               </div>
 
               <div className="space-y-4">
@@ -2728,7 +2769,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                           {/* Player Cards in this Division */}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                             {group.stats.map((stat) => {
-                              const isExpanded = expandedPlayerStats === stat.player.id;
+                              const isExpanded = expandedPlayerIds.has(stat.player.id);
                               const latestPlayer = players.find(
                                 (p) => p.id === stat.player.id || p.email.toLowerCase() === (stat.player.email || '').toLowerCase()
                               );
@@ -2741,7 +2782,7 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 >
                                   <div
                                     onClick={() =>
-                                      setExpandedPlayerStats(isExpanded ? null : stat.player.id)
+                                      togglePlayerStatsExpanded(stat.player.id)
                                     }
                                     className="flex items-center justify-between cursor-pointer"
                                   >
