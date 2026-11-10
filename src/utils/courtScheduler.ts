@@ -173,8 +173,41 @@ export function swapPlayersInSchedule(
 ): TournamentScheduleResult {
   if (!schedule || !schedule.rounds) return schedule;
 
-  const p1 = allPlayers.find((p) => p.id === playerId1);
-  const p2 = allPlayers.find((p) => p.id === playerId2);
+  const isMatch = (p: any, targetId: string) => {
+    if (!p) return false;
+    if (p.id && (p.id === targetId || p.id.toLowerCase() === targetId.toLowerCase())) return true;
+    const targetP = (allPlayers || []).find((tp) => tp.id === targetId);
+    if (targetP) {
+      if (p.id && (p.id === targetP.id || p.id.toLowerCase() === targetP.id.toLowerCase())) return true;
+      if (p.email && targetP.email && p.email.toLowerCase() === targetP.email.toLowerCase()) return true;
+      if (p.name && targetP.name && p.name.trim() === targetP.name.trim()) return true;
+    }
+    return false;
+  };
+
+  let p1 = (allPlayers || []).find((p) => p.id === playerId1 || isMatch(p, playerId1));
+  let p2 = (allPlayers || []).find((p) => p.id === playerId2 || isMatch(p, playerId2));
+
+  // If not found in allPlayers, locate in divisions or matches
+  if (!p1 || !p2) {
+    for (const div of schedule.tierDivisions || []) {
+      for (const p of div.players || []) {
+        if (!p1 && (p.id === playerId1 || isMatch(p, playerId1))) p1 = p;
+        if (!p2 && (p.id === playerId2 || isMatch(p, playerId2))) p2 = p;
+      }
+    }
+  }
+  if (!p1 || !p2) {
+    for (const round of schedule.rounds) {
+      for (const match of round.matches || []) {
+        for (const p of [...(match.teamA || []), ...(match.teamB || [])]) {
+          if (!p1 && (p.id === playerId1 || isMatch(p, playerId1))) p1 = p;
+          if (!p2 && (p.id === playerId2 || isMatch(p, playerId2))) p2 = p;
+        }
+      }
+    }
+  }
+
   if (!p1 || !p2) return schedule;
 
   // 1. Swap in rounds / matches
@@ -182,8 +215,8 @@ export function swapPlayersInSchedule(
     const updatedMatches = (round.matches || []).map((match) => {
       const swapPlayer = (p: PlayerSubmission): PlayerSubmission => {
         if (!p) return p;
-        if (p.id === playerId1) return p2;
-        if (p.id === playerId2) return p1;
+        if (isMatch(p, playerId1)) return p2!;
+        if (isMatch(p, playerId2)) return p1!;
         return p;
       };
 
@@ -209,13 +242,13 @@ export function swapPlayersInSchedule(
 
   // 2. Swap in tierDivisions
   const updatedDivisions = (schedule.tierDivisions || []).map((div) => {
-    const hasP1 = (div.players || []).some((p) => p.id === playerId1);
-    const hasP2 = (div.players || []).some((p) => p.id === playerId2);
+    const hasP1 = (div.players || []).some((p) => isMatch(p, playerId1));
+    const hasP2 = (div.players || []).some((p) => isMatch(p, playerId2));
     if (!hasP1 && !hasP2) return div;
 
     const swappedPlayers = (div.players || []).map((p) => {
-      if (p.id === playerId1) return p2;
-      if (p.id === playerId2) return p1;
+      if (isMatch(p, playerId1)) return p2!;
+      if (isMatch(p, playerId2)) return p1!;
       return p;
     });
 
@@ -454,68 +487,70 @@ export function computeScheduleFingerprint(schedule: TournamentScheduleResult): 
  */
 export function compilePlayerScheduleStats(
   rounds: ScheduleRound[],
-  players: PlayerSubmission[]
+  players?: PlayerSubmission[]
 ): Record<string, PlayerScheduleStat> {
   const playerStats: Record<string, PlayerScheduleStat> = {};
-  players.forEach((p) => {
-    playerStats[p.id] = {
-      player: p,
-      matches: [],
-      totalMatches: 0,
-    };
+
+  (players || []).forEach((p) => {
+    if (p && p.id) {
+      playerStats[p.id] = {
+        player: p,
+        matches: [],
+        totalMatches: 0,
+      };
+    }
   });
 
-  rounds.forEach((round) => {
-    round.matches.forEach((match) => {
+  // Ensure any player appearing in matches is seeded into playerStats
+  (rounds || []).forEach((round) => {
+    (round.matches || []).forEach((match) => {
+      [...(match.teamA || []), ...(match.teamB || [])].forEach((p) => {
+        if (p && p.id && !playerStats[p.id]) {
+          playerStats[p.id] = {
+            player: p,
+            matches: [],
+            totalMatches: 0,
+          };
+        }
+      });
+    });
+  });
+
+  (rounds || []).forEach((round) => {
+    (round.matches || []).forEach((match) => {
       const { teamA, teamB, roundNumber, courtNumber, id } = match;
+      if (!teamA || !teamB || teamA.length < 2 || teamB.length < 2) return;
 
-      // Team A Player 1
-      if (playerStats[teamA[0].id]) {
-        playerStats[teamA[0].id].matches.push({
-          matchId: id,
-          roundNumber,
-          courtNumber,
-          partner: teamA[1],
-          opponents: [teamB[0], teamB[1]],
-        });
-        playerStats[teamA[0].id].totalMatches++;
-      }
+      const addMatchRecord = (target: PlayerSubmission, partner: PlayerSubmission, opponents: [PlayerSubmission, PlayerSubmission]) => {
+        if (!target) return;
+        let stat = playerStats[target.id];
+        if (!stat) {
+          const key = Object.keys(playerStats).find((k) => {
+            const item = playerStats[k];
+            return (
+              (item.player.name && target.name && item.player.name.trim() === target.name.trim()) ||
+              (item.player.email && target.email && item.player.email.toLowerCase() === target.email.toLowerCase())
+            );
+          });
+          if (key) stat = playerStats[key];
+        }
 
-      // Team A Player 2
-      if (playerStats[teamA[1].id]) {
-        playerStats[teamA[1].id].matches.push({
-          matchId: id,
-          roundNumber,
-          courtNumber,
-          partner: teamA[0],
-          opponents: [teamB[0], teamB[1]],
-        });
-        playerStats[teamA[1].id].totalMatches++;
-      }
+        if (stat) {
+          stat.matches.push({
+            matchId: id,
+            roundNumber,
+            courtNumber,
+            partner,
+            opponents,
+          });
+          stat.totalMatches++;
+        }
+      };
 
-      // Team B Player 1
-      if (playerStats[teamB[0].id]) {
-        playerStats[teamB[0].id].matches.push({
-          matchId: id,
-          roundNumber,
-          courtNumber,
-          partner: teamB[1],
-          opponents: [teamA[0], teamA[1]],
-        });
-        playerStats[teamB[0].id].totalMatches++;
-      }
-
-      // Team B Player 2
-      if (playerStats[teamB[1].id]) {
-        playerStats[teamB[1].id].matches.push({
-          matchId: id,
-          roundNumber,
-          courtNumber,
-          partner: teamB[0],
-          opponents: [teamA[0], teamA[1]],
-        });
-        playerStats[teamB[1].id].totalMatches++;
-      }
+      addMatchRecord(teamA[0], teamA[1], [teamB[0], teamB[1]]);
+      addMatchRecord(teamA[1], teamA[0], [teamB[0], teamB[1]]);
+      addMatchRecord(teamB[0], teamB[1], [teamA[0], teamA[1]]);
+      addMatchRecord(teamB[1], teamB[0], [teamA[0], teamA[1]]);
     });
   });
 

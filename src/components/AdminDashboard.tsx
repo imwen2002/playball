@@ -18,6 +18,7 @@ import {
   assignRefereesToSchedule,
   analyzeRefereeCapacity,
   swapPlayersInSchedule,
+  compilePlayerScheduleStats,
   RefereeCapacityReport,
   FivePlayerValidationResult,
 } from '../utils/courtScheduler';
@@ -184,11 +185,31 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       return;
     }
 
-    const pA = players.find((p) => p.id === swapPlayerAId);
-    const pB = players.find((p) => p.id === swapPlayerBId);
-    if (!pA || !pB) return;
+    const pA =
+      players.find((p) => p.id === swapPlayerAId) ||
+      swapModalGroup?.stats?.find((s: any) => s.player?.id === swapPlayerAId)?.player ||
+      courtSchedule.tierDivisions?.flatMap((d) => d.players).find((p) => p.id === swapPlayerAId);
+    const pB =
+      players.find((p) => p.id === swapPlayerBId) ||
+      swapModalGroup?.stats?.find((s: any) => s.player?.id === swapPlayerBId)?.player ||
+      courtSchedule.tierDivisions?.flatMap((d) => d.players).find((p) => p.id === swapPlayerBId);
 
-    const updated = swapPlayersInSchedule(courtSchedule, swapPlayerAId, swapPlayerBId, players);
+    if (!pA || !pB) {
+      alert('找不到選取的選手資料！');
+      return;
+    }
+
+    // Merge players prop with any players defined in schedule to guarantee complete player list
+    const combinedPlayers: PlayerSubmission[] = [...players];
+    (courtSchedule.tierDivisions || []).forEach((div) => {
+      (div.players || []).forEach((dp) => {
+        if (!combinedPlayers.some((p) => p.id === dp.id)) {
+          combinedPlayers.push(dp as PlayerSubmission);
+        }
+      });
+    });
+
+    const updated = swapPlayersInSchedule(courtSchedule, swapPlayerAId, swapPlayerBId, combinedPlayers);
     setCourtSchedule(updated);
     setIsCloudSyncing(true);
     setScheduleNotice(`✨ 已成功對換【${pA.name}】與【${pB.name}】的席位！出賽檢核表與對戰組合已即時更新並同步雲端！`);
@@ -213,7 +234,11 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       (cloudState) => {
         if (cloudState) {
           if (cloudState.courtSchedule) {
-            setCourtSchedule(cloudState.courtSchedule);
+            const raw = { ...cloudState.courtSchedule };
+            if (!raw.playerStats || Object.keys(raw.playerStats).length === 0) {
+              raw.playerStats = compilePlayerScheduleStats(raw.rounds || [], players);
+            }
+            setCourtSchedule(raw);
           }
           if (cloudState.matchScores) {
             setMatchScores(cloudState.matchScores);
@@ -244,7 +269,20 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
       }
     );
     return () => unsubscribe();
-  }, []);
+  }, [players]);
+
+  // Ensure playerStats is always populated whenever courtSchedule.rounds or players exist
+  useEffect(() => {
+    if (courtSchedule && courtSchedule.rounds && (!courtSchedule.playerStats || Object.keys(courtSchedule.playerStats).length === 0)) {
+      setCourtSchedule((current) => {
+        if (!current) return current;
+        return {
+          ...current,
+          playerStats: compilePlayerScheduleStats(current.rounds || [], players),
+        };
+      });
+    }
+  }, [players, courtSchedule?.rounds]);
 
   // Debounced cloud synchronization queue: prevents network saturation and guarantees 0ms UI responsiveness
   const debounceTimerRef = useRef<NodeJS.Timeout | null>(null);

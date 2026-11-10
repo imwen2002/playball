@@ -317,6 +317,8 @@ function pruneScheduleForCloud(schedule: any): any {
         substitutions: m.substitutions || null,
       })),
     })),
+    playerStats: schedule.playerStats || null,
+    totalMatchesScheduled: schedule.totalMatchesScheduled || 0,
   };
 }
 
