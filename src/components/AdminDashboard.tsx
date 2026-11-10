@@ -17,6 +17,7 @@ import {
   computeScheduleFingerprint,
   assignRefereesToSchedule,
   analyzeRefereeCapacity,
+  swapPlayersInSchedule,
   RefereeCapacityReport,
   FivePlayerValidationResult,
 } from '../utils/courtScheduler';
@@ -171,6 +172,40 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
 
   // Score bracket filter: 'all' | 4 | 3 | 2 | 1 | 0
   const [selectedScoreBracket, setSelectedScoreBracket] = useState<'all' | number>('all');
+
+  // Swap player positions within division modal state
+  const [swapModalGroup, setSwapModalGroup] = useState<any | null>(null);
+  const [swapPlayerAId, setSwapPlayerAId] = useState<string>('');
+  const [swapPlayerBId, setSwapPlayerBId] = useState<string>('');
+
+  const handleExecuteSwapPlayers = async () => {
+    if (!courtSchedule || !swapPlayerAId || !swapPlayerBId || swapPlayerAId === swapPlayerBId) {
+      alert('請選擇本組內兩位不同的選手進行席位對調！');
+      return;
+    }
+
+    const pA = players.find((p) => p.id === swapPlayerAId);
+    const pB = players.find((p) => p.id === swapPlayerBId);
+    if (!pA || !pB) return;
+
+    const updated = swapPlayersInSchedule(courtSchedule, swapPlayerAId, swapPlayerBId, players);
+    setCourtSchedule(updated);
+    setIsCloudSyncing(true);
+    setScheduleNotice(`✨ 已成功對換【${pA.name}】與【${pB.name}】的席位！出賽檢核表與對戰組合已即時更新並同步雲端！`);
+    setTimeout(() => setScheduleNotice(null), 4500);
+    setSwapModalGroup(null);
+    setSwapPlayerAId('');
+    setSwapPlayerBId('');
+
+    try {
+      await saveTournamentState(updated, matchScores, referees);
+      setLastCloudSyncTime(new Date().toLocaleTimeString('zh-TW'));
+    } catch (err) {
+      console.warn('Failed saving swapped schedule to cloud:', err);
+    } finally {
+      setIsCloudSyncing(false);
+    }
+  };
 
   // Realtime subscription to tournament cloud state (schedule, scores, completion, referees)
   useEffect(() => {
@@ -2761,9 +2796,26 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                                 第 {gIdx + 1} 組
                               </span>
                             </div>
-                            <span className="text-[11px] text-slate-500 font-medium">
-                              本組共 {group.stats.length} 位選手
-                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[11px] text-slate-500 font-medium">
+                                本組共 {group.stats.length} 位選手
+                              </span>
+                              {!isPublicView && group.stats.length >= 2 && (
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSwapModalGroup(group);
+                                    setSwapPlayerAId(group.stats[0]?.player?.id || '');
+                                    setSwapPlayerBId(group.stats[1]?.player?.id || '');
+                                  }}
+                                  className="inline-flex items-center gap-1 px-2 py-0.5 text-[11px] font-bold rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 shadow-2xs transition-colors cursor-pointer"
+                                  title="對換本組兩位選手的席位與出賽排程"
+                                >
+                                  <ArrowRightLeft className="w-3 h-3 text-emerald-600" />
+                                  <span>選手席位對調</span>
+                                </button>
+                              )}
+                            </div>
                           </div>
 
                           {/* Player Cards in this Division */}
@@ -5323,6 +5375,131 @@ export const AdminDashboard: React.FC<AdminDashboardProps> = ({
                   確認更換裁判
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Swap Player Positions Modal (組內選手席位對調) */}
+      {swapModalGroup && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs">
+          <div className="w-full max-w-lg bg-white rounded-2xl shadow-2xl border border-emerald-200 overflow-hidden flex flex-col max-h-[92vh] animate-in fade-in zoom-in-95 duration-150">
+            {/* Modal Header */}
+            <div className="bg-gradient-to-r from-emerald-600 to-teal-700 p-4 sm:p-5 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center shrink-0">
+                  <ArrowRightLeft className="w-5 h-5 text-white" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-base leading-tight">
+                    組內選手席位對調（{swapModalGroup.label || `第 ${swapModalGroup.divisionIndex + 1} 組`}）
+                  </h3>
+                  <p className="text-xs text-emerald-100 font-medium">
+                    對換兩位選手的出賽席位，出賽與輪休輪次完全對調，依然符合 0 重複搭檔公理
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSwapModalGroup(null)}
+                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-white/80 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 space-y-4 overflow-y-auto">
+              <div className="p-3 bg-emerald-50 rounded-xl border border-emerald-200 text-xs text-emerald-950 space-y-1">
+                <div className="font-bold flex items-center gap-1.5 text-emerald-900">
+                  <span>💡 席位對調說明</span>
+                </div>
+                <p>
+                  當您對調兩位選手時，他們在賽程中的出賽輪次、輪休輪次與搭檔對戰將完全互換。組內其餘 3 位選手的輪休輪次保持不變，賽事依然 100% 滿足「每人打 4 場、搭檔 0 重複」的數學公理。
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    選手一（原位置） <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={swapPlayerAId}
+                    onChange={(e) => setSwapPlayerAId(e.target.value)}
+                    className="w-full p-2.5 text-xs font-bold border border-slate-300 rounded-xl bg-slate-50 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">請選擇第一位選手</option>
+                    {(swapModalGroup.stats || []).map((s: any) => {
+                      const lp = players.find((p) => p.id === s.player.id || p.email.toLowerCase() === (s.player.email || '').toLowerCase());
+                      const name = lp?.name || s.player.name;
+                      return (
+                        <option key={s.player.id} value={s.player.id} disabled={s.player.id === swapPlayerBId}>
+                          {name} (Lv {s.player.level ?? 0})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-bold text-slate-700">
+                    選手二（對調目標） <span className="text-rose-500">*</span>
+                  </label>
+                  <select
+                    value={swapPlayerBId}
+                    onChange={(e) => setSwapPlayerBId(e.target.value)}
+                    className="w-full p-2.5 text-xs font-bold border border-slate-300 rounded-xl bg-slate-50 text-slate-800 focus:bg-white focus:ring-2 focus:ring-emerald-500"
+                  >
+                    <option value="">請選擇第二位選手</option>
+                    {(swapModalGroup.stats || []).map((s: any) => {
+                      const lp = players.find((p) => p.id === s.player.id || p.email.toLowerCase() === (s.player.email || '').toLowerCase());
+                      const name = lp?.name || s.player.name;
+                      return (
+                        <option key={s.player.id} value={s.player.id} disabled={s.player.id === swapPlayerAId}>
+                          {name} (Lv {s.player.level ?? 0})
+                        </option>
+                      );
+                    })}
+                  </select>
+                </div>
+              </div>
+
+              {swapPlayerAId && swapPlayerBId && swapPlayerAId !== swapPlayerBId && (() => {
+                const pA = players.find((p) => p.id === swapPlayerAId);
+                const pB = players.find((p) => p.id === swapPlayerBId);
+                return (
+                  <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 text-xs flex items-center justify-center gap-3">
+                    <span className="font-extrabold text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-300 shadow-2xs">
+                      {pA?.name}
+                    </span>
+                    <ArrowRightLeft className="w-4 h-4 text-emerald-600 shrink-0" />
+                    <span className="font-extrabold text-slate-900 bg-white px-2.5 py-1 rounded-lg border border-slate-300 shadow-2xs">
+                      {pB?.name}
+                    </span>
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Modal Footer */}
+            <div className="bg-slate-50 p-4 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setSwapModalGroup(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleExecuteSwapPlayers}
+                disabled={!swapPlayerAId || !swapPlayerBId || swapPlayerAId === swapPlayerBId}
+                className="px-4 py-2 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 rounded-xl shadow-xs transition-colors cursor-pointer flex items-center gap-1.5"
+              >
+                <ArrowRightLeft className="w-3.5 h-3.5" />
+                <span>確認執行席位對換</span>
+              </button>
             </div>
           </div>
         </div>

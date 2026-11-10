@@ -71,80 +71,35 @@ export function validateFivePlayerRule(players: PlayerSubmission[]): FivePlayerV
     };
   }
 
-  // Group players strictly by their Tier
-  const tierMap = new Map<string, PlayerSubmission[]>();
-  BADMINTON_TIERS.forEach((t) => tierMap.set(t.tierId, []));
+  const remainder = total % 5;
+  const missingCount = remainder === 0 ? 0 : 5 - remainder;
+  const groupCount = Math.floor(total / 5);
 
-  players.forEach((p) => {
-    const tier = getTierByLevel(p.level);
-    const list = tierMap.get(tier.tierId) || [];
-    list.push(p);
-    tierMap.set(tier.tierId, list);
-  });
-
-  const tierDetails: TierValidationDetail[] = [];
-  const invalidTiers: TierValidationDetail[] = [];
-  let totalGroups = 0;
-  let totalMissing = 0;
-
-  BADMINTON_TIERS.forEach((t) => {
-    const pList = tierMap.get(t.tierId) || [];
-    const count = pList.length;
-    if (count > 0) {
-      const remainder = count % 5;
-      const isValid = count >= 5 && remainder === 0;
-      const missingCount = remainder === 0 ? 0 : 5 - remainder;
-      const detail: TierValidationDetail = {
-        tierId: t.tierId,
-        tierName: t.name,
-        count,
-        isValid,
-        remainder,
-        missingCount,
-      };
-      tierDetails.push(detail);
-      totalGroups += Math.floor(count / 5);
-      if (!isValid) {
-        invalidTiers.push(detail);
-        totalMissing += missingCount;
-      }
-    }
-  });
-
-  if (invalidTiers.length > 0) {
-    const tierListLines = invalidTiers
-      .map((it) => {
-        if (it.count < 5) {
-          return `• 【${it.tierName}】：目前僅 ${it.count} 人，不足 1 組（尚差 ${it.missingCount} 人湊滿 5 人組）`;
-        }
-        return `• 【${it.tierName}】：目前 ${it.count} 人，多出 ${it.remainder} 人未成組（尚差 ${it.missingCount} 人湊滿整組）`;
-      })
-      .join('\n');
-
+  if (total < 5 || remainder !== 0) {
     const errorMessage =
-      `【排程失敗：同階級人數未滿 5 人倍數，不可跨階配對】\n\n` +
-      `賽事規定「每人打 4 場且隊友不重複」，同階級配對人數【一定要剛好 5 位】（或 5 的倍數，如 5、10、15 人），且【嚴格禁止跨階配對】。\n\n` +
-      `目前人數不符的階級如下：\n${tierListLines}\n\n` +
-      `請至「選手名單與等級微調」手動調整選手等級或補足各階級選手至 5 人倍數後，再進行一鍵排程！`;
+      `【賽程防呆：總人數需為 5 的倍數】\n\n` +
+      `賽事規定「每人固定打 4 場且搭檔 0 重複」，總報名人數必須為 5 的倍數。\n` +
+      `目前報名人數共 ${total} 人，尚差 ${missingCount} 人成組（可組 ${groupCount} 組，剩餘 ${remainder} 人）。\n\n` +
+      `請至「選手名單與等級微調」補足人數至 5 的倍數後，再進行一鍵排程！`;
 
     return {
       isValid: false,
       totalPlayers: total,
-      groupCount: totalGroups,
-      remainder: total % 5,
-      missingCount: totalMissing,
+      groupCount,
+      remainder,
+      missingCount,
       errorMessage,
-      tierDetails,
+      tierDetails: [],
     };
   }
 
   return {
     isValid: true,
     totalPlayers: total,
-    groupCount: totalGroups,
+    groupCount,
     remainder: 0,
     missingCount: 0,
-    tierDetails,
+    tierDetails: [],
   };
 }
 
@@ -161,7 +116,7 @@ export function shuffleArray<T>(array: T[]): T[] {
 }
 
 /**
- * Cluster players strictly by Tier into 5-player divisions (不能跨階配對).
+ * Cluster players into 5-player divisions strictly sorted by level ascending (不跨階混戰，最相近戰力成組).
  * When randomize=true, uses AI random draw to shuffle seat order within each 5-player group.
  */
 export function clusterPlayersIntoDivisions(
@@ -170,67 +125,115 @@ export function clusterPlayersIntoDivisions(
 ): DivisionPool[] {
   if (players.length === 0) return [];
 
-  // Group players strictly by their Tier
-  const tierMap = new Map<string, PlayerSubmission[]>();
-  BADMINTON_TIERS.forEach((t) => tierMap.set(t.tierId, []));
-
-  players.forEach((p) => {
-    const tier = getTierByLevel(p.level);
-    const list = tierMap.get(tier.tierId) || [];
-    list.push(p);
-    tierMap.set(tier.tierId, list);
+  // Sort players by level ascending (戰力由低至高排序)
+  const sorted = [...players].sort((a, b) => {
+    if (a.level !== b.level) return a.level - b.level;
+    return a.name.localeCompare(b.name, 'zh-Hant');
   });
 
+  const groupSize = 5;
   const divisions: DivisionPool[] = [];
   let globalDivIndex = 0;
 
-  BADMINTON_TIERS.forEach((tier) => {
-    const tierPlayers = tierMap.get(tier.tierId) || [];
-    if (tierPlayers.length === 0) return;
+  for (let i = 0; i < sorted.length; i += groupSize) {
+    let groupPlayers = sorted.slice(i, i + groupSize);
+    if (groupPlayers.length < 5) continue; // Safety guard: ignore non-complete group
 
-    // Sort by level ascending within tier so closer levels play together
-    const sorted = [...tierPlayers].sort((a, b) => {
-      if (a.level !== b.level) return a.level - b.level;
-      return a.name.localeCompare(b.name, 'zh-Hant');
-    });
-
-    const groupSize = 5;
-    const tierDivisionCount = Math.floor(sorted.length / groupSize);
-
-    for (let i = 0; i < sorted.length; i += groupSize) {
-      let groupPlayers = sorted.slice(i, i + groupSize);
-      if (groupPlayers.length < 5) continue; // Safety guard: ignore non-complete group
-
-      // AI Random draw: shuffle the 5 players so who gets seats P0..P4 is completely randomized!
-      if (randomize) {
-        groupPlayers = shuffleArray(groupPlayers);
-      }
-
-      const subIndex = Math.floor(i / groupSize);
-      const subLetter = String.fromCharCode(65 + (subIndex % 26)); // A, B, C...
-      const minLvl = Math.min(...groupPlayers.map((p) => p.level));
-      const maxLvl = Math.max(...groupPlayers.map((p) => p.level));
-
-      const subLabel =
-        tierDivisionCount > 1
-          ? `【${tier.name} ${subLetter}組】`
-          : `【${tier.name}】`;
-
-      const levelInfo =
-        minLvl === maxLvl ? `Lv ${minLvl}` : `Lv ${minLvl} ~ Lv ${maxLvl}`;
-
-      const tierLabel = `${subLabel} (${levelInfo} · 5人循環)`;
-
-      divisions.push({
-        tierId: tier.tierId,
-        tierLabel,
-        divisionIndex: globalDivIndex++,
-        players: groupPlayers,
-      });
+    // AI Random draw: shuffle the 5 players so who gets seats P0..P4 is completely randomized!
+    if (randomize) {
+      groupPlayers = shuffleArray(groupPlayers);
     }
-  });
+
+    const minLvl = Math.min(...groupPlayers.map((p) => p.level));
+    const maxLvl = Math.max(...groupPlayers.map((p) => p.level));
+    const mainTier = getTierByLevel(Math.round((minLvl + maxLvl) / 2));
+    const levelInfo = minLvl === maxLvl ? `Lv ${minLvl}` : `Lv ${minLvl} ~ Lv ${maxLvl}`;
+    const tierLabel = `【${mainTier.name} 第 ${globalDivIndex + 1} 組】 (${levelInfo} · 5人循環)`;
+
+    divisions.push({
+      tierId: mainTier.tierId,
+      tierLabel,
+      divisionIndex: globalDivIndex++,
+      players: groupPlayers,
+    });
+  }
 
   return divisions;
+}
+
+/**
+ * Swaps two players' seat positions in an active tournament schedule.
+ * Accurately updates all matches across rounds, tier divisions, and recompiles player stats.
+ */
+export function swapPlayersInSchedule(
+  schedule: TournamentScheduleResult,
+  playerId1: string,
+  playerId2: string,
+  allPlayers: PlayerSubmission[]
+): TournamentScheduleResult {
+  if (!schedule || !schedule.rounds) return schedule;
+
+  const p1 = allPlayers.find((p) => p.id === playerId1);
+  const p2 = allPlayers.find((p) => p.id === playerId2);
+  if (!p1 || !p2) return schedule;
+
+  // 1. Swap in rounds / matches
+  const updatedRounds = schedule.rounds.map((round) => {
+    const updatedMatches = (round.matches || []).map((match) => {
+      const swapPlayer = (p: PlayerSubmission): PlayerSubmission => {
+        if (!p) return p;
+        if (p.id === playerId1) return p2;
+        if (p.id === playerId2) return p1;
+        return p;
+      };
+
+      const updatedTeamA = match.teamA
+        ? ([swapPlayer(match.teamA[0]), swapPlayer(match.teamA[1])] as [PlayerSubmission, PlayerSubmission])
+        : match.teamA;
+      const updatedTeamB = match.teamB
+        ? ([swapPlayer(match.teamB[0]), swapPlayer(match.teamB[1])] as [PlayerSubmission, PlayerSubmission])
+        : match.teamB;
+
+      return {
+        ...match,
+        teamA: updatedTeamA,
+        teamB: updatedTeamB,
+      };
+    });
+
+    return {
+      ...round,
+      matches: updatedMatches,
+    };
+  });
+
+  // 2. Swap in tierDivisions
+  const updatedDivisions = (schedule.tierDivisions || []).map((div) => {
+    const hasP1 = (div.players || []).some((p) => p.id === playerId1);
+    const hasP2 = (div.players || []).some((p) => p.id === playerId2);
+    if (!hasP1 && !hasP2) return div;
+
+    const swappedPlayers = (div.players || []).map((p) => {
+      if (p.id === playerId1) return p2;
+      if (p.id === playerId2) return p1;
+      return p;
+    });
+
+    return {
+      ...div,
+      players: swappedPlayers,
+    };
+  });
+
+  // 3. Recompile playerStats
+  const updatedPlayerStats = compilePlayerScheduleStats(updatedRounds, allPlayers);
+
+  return {
+    ...schedule,
+    rounds: updatedRounds,
+    tierDivisions: updatedDivisions,
+    playerStats: updatedPlayerStats,
+  };
 }
 
 /**
